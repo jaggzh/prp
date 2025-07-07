@@ -102,6 +102,35 @@ class DebianPlatform:
     def is_available() -> bool:
         return Path('/etc/debian_version').exists()
     
+    def package_exists(self, package_name: str) -> bool:
+        """Check if package exists in repositories"""
+        try:
+            result = subprocess.run(['apt-cache', 'show', package_name], 
+                                  capture_output=True, text=True)
+            return result.returncode == 0
+        except:
+            return False
+    
+    def package_status(self, package_name: str):
+        """Return (is_installed, is_manual)"""
+        try:
+            # Check if installed
+            result = subprocess.run(['dpkg', '-l', package_name], 
+                                  capture_output=True, text=True)
+            is_installed = result.returncode == 0 and 'ii' in result.stdout
+            
+            if not is_installed:
+                return False, False
+            
+            # Check if manually installed
+            result = subprocess.run(['apt-mark', 'showmanual', package_name], 
+                                  capture_output=True, text=True)
+            is_manual = package_name in result.stdout.strip().split('\n')
+            
+            return is_installed, is_manual
+        except:
+            return False, False
+    
     def build_meta_package(self, name: str, deps: List[str], version: str, maintainer: str) -> Path:
         """Build meta-package using equivs-build"""
         if not deps:
@@ -194,7 +223,7 @@ class PRP:
         print(f"{c.BLUE}Package named appropriately as '{package_name}'{c.RESET}")
         print(f"{c.GREEN}Created: ./.prp/state.yaml{c.RESET}")
     
-    def cmd_add(self, package_name: str):
+    def cmd_add(self, package_name: str, force: bool = False, manual: bool = False, no_auto: bool = False):
         """Add package to dependencies"""
         state = self.state_manager.load()
         
@@ -203,20 +232,49 @@ class PRP:
             print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
             return
         
+        print(f"{c.BLUE}Testing {package_name} status...{c.RESET}")
+        
+        # Check if package exists
+        pkg_exists = self.platform.package_exists(package_name)
+        if not pkg_exists and not force:
+            print(f"{c.RED}   {package_name} was not found as a [Debian] package{c.RESET}")
+            print(f"{c.DIM}Use -f / --force to force add it as a dependency{c.RESET}")
+            return
+        elif not pkg_exists and force:
+            print(f"{c.YELLOW}   {package_name} not found but forcing addition{c.RESET}")
+        
+        # Check installation status
+        if pkg_exists:
+            is_installed, is_manual = self.platform.package_status(package_name)
+            if is_installed:
+                if is_manual and not no_auto and not manual:
+                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed{c.RESET}")
+                    self.platform.mark_auto([package_name])
+                    print(f"{c.BLUE}   Marked as auto-installed{c.RESET}")
+                    print(f"{c.DIM}   (use -m to keep as manually installed, or -A to skip auto-marking){c.RESET}")
+                elif is_manual and manual:
+                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed (keeping as manual){c.RESET}")
+                elif is_manual and no_auto:
+                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed (not changing){c.RESET}")
+                else:
+                    print(f"{c.GREEN}   {package_name} is auto-installed{c.RESET}")
+            else:
+                print(f"{c.YELLOW}   {package_name} is not installed{c.RESET}")
+        
         # Move from tentative if it was there
         if package_name in state['tentative']:
             state['tentative'].remove(package_name)
-            print(f"{c.YELLOW}{package_name} moved from tentative to dependencies{c.RESET}")
+            print(f"{c.BGREEN}{package_name} moved from tentative to dependencies{c.RESET}")
         
         if package_name not in state['dependencies']:
             state['dependencies'].append(package_name)
-            print(f"{c.GREEN}{package_name} added to dependencies{c.RESET}")
+            print(f"{c.BGREEN}{package_name} added to dependencies{c.RESET}")
         else:
             print(f"{c.YELLOW}{package_name} already in dependencies{c.RESET}")
         
         self.state_manager.save(state)
     
-    def cmd_remove(self, package_name: str):
+    def cmd_remove_package(self, package_name: str):
         """Remove package from dependencies and mark for cleanup"""
         state = self.state_manager.load()
         
@@ -383,6 +441,9 @@ def show_help():
 {c.BOLD}Commands:{c.RESET}
   {c.BGREEN}n, new{c.RESET} PROJECT_NAME    Create new project
   {c.BGREEN}a, add{c.RESET} PACKAGE         Add package to dependencies  
+    {c.DIM}-f, --force          Force add even if package not found{c.RESET}
+    {c.DIM}-m, --manual         Keep package marked as manually installed{c.RESET}
+    {c.DIM}-A, --no-auto        Don't change package's manual/auto status{c.RESET}
   {c.BGREEN}r, remove{c.RESET} PACKAGE      Remove from dependencies & mark for cleanup
   {c.BGREEN}e, eval{c.RESET} PACKAGE        Add to tentative list (evaluating)
   {c.BGREEN}s, status{c.RESET}              Show current project status
@@ -391,9 +452,10 @@ def show_help():
 
 {c.BOLD}Example workflow:{c.RESET}
   {c.CYAN}$ prp n mediapipe{c.RESET}                   {c.DIM}# Start new project{c.RESET}
-  {c.CYAN}$ sudo apt install libjpeg9{c.RESET}         {c.DIM}# Install manually to test{c.RESET}
-  {c.CYAN}$ prp e libjpeg9{c.RESET}                    {c.DIM}# Mark as evaluating{c.RESET}
-  {c.CYAN}$ prp a libjpeg9{c.RESET}                    {c.DIM}# Confirm as dependency{c.RESET}
+  {c.CYAN}$ sudo apt install libjpeg-dev{c.RESET}      {c.DIM}# Install manually to test{c.RESET}
+  {c.CYAN}$ prp a libjpeg-dev{c.RESET}                 {c.DIM}# Add & auto-mark package{c.RESET}
+  {c.CYAN}$ prp e libpng-dev{c.RESET}                  {c.DIM}# Mark as evaluating{c.RESET}
+  {c.CYAN}$ prp a libpng-dev{c.RESET}                  {c.DIM}# Confirm as dependency{c.RESET}
   {c.CYAN}$ prp install{c.RESET}                       {c.DIM}# Create & install meta-package{c.RESET}
 
 {c.DIM}State stored in ./.prp/state.yaml{c.RESET}
@@ -408,35 +470,43 @@ def main():
     prp = PRP()
     
     command = sys.argv[1].lower()
+    args = sys.argv[2:]
     
     # Command aliases
     if command in ['n', 'new']:
-        if len(sys.argv) < 3:
+        if len(args) < 1:
             print(f"{c.RED}Error: Project name required{c.RESET}")
             print(f"{c.DIM}Usage: prp n PROJECT_NAME{c.RESET}")
             return
-        prp.cmd_new(sys.argv[2])
+        prp.cmd_new(args[0])
     
     elif command in ['a', 'add']:
-        if len(sys.argv) < 3:
+        if len(args) < 1:
             print(f"{c.RED}Error: Package name required{c.RESET}")
-            print(f"{c.DIM}Usage: prp a PACKAGE{c.RESET}")
+            print(f"{c.DIM}Usage: prp a PACKAGE [-f] [-m] [-A]{c.RESET}")
             return
-        prp.cmd_add(sys.argv[2])
+        
+        # Parse flags for add command
+        package_name = args[0]
+        force = '-f' in args or '--force' in args
+        manual = '-m' in args or '--manual' in args
+        no_auto = '-A' in args or '--no-auto' in args
+        
+        prp.cmd_add(package_name, force=force, manual=manual, no_auto=no_auto)
     
     elif command in ['r', 'remove']:
-        if len(sys.argv) < 3:
+        if len(args) < 1:
             print(f"{c.RED}Error: Package name required{c.RESET}")
             print(f"{c.DIM}Usage: prp r PACKAGE{c.RESET}")
             return
-        prp.cmd_remove(sys.argv[2])
+        prp.cmd_remove_package(args[0])
     
     elif command in ['e', 'eval']:
-        if len(sys.argv) < 3:
+        if len(args) < 1:
             print(f"{c.RED}Error: Package name required{c.RESET}")
             print(f"{c.DIM}Usage: prp e PACKAGE{c.RESET}")
             return
-        prp.cmd_eval(sys.argv[2])
+        prp.cmd_eval(args[0])
     
     elif command in ['s', 'status']:
         prp.cmd_status()
@@ -445,7 +515,7 @@ def main():
         prp.cmd_install()
     
     elif command == 'uninstall':
-        prp.cmd_remove()
+        prp.cmd_uninstall()
     
     else:
         print(f"{c.RED}Unknown command: {command}{c.RESET}")

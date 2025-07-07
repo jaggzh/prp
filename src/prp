@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""
+PRP (Project Requirements Packager)
+A beautiful, minimal tool for tracking project dependencies and creating meta-packages.
+"""
+
+import sys
+import os
+import yaml
+import argparse
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+
+# ANSI Colors for beautiful output
+class Colors:
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    
+    # Regular colors
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+    WHITE = '\033[37m'
+    
+    # Bright colors
+    BRED = '\033[91m'
+    BGREEN = '\033[92m'
+    BYELLOW = '\033[93m'
+    BBLUE = '\033[94m'
+    BMAGENTA = '\033[95m'
+    BCYAN = '\033[96m'
+    BWHITE = '\033[97m'
+
+c = Colors()
+
+class PRPState:
+    """Manages the .prp/state.yaml file"""
+    
+    def __init__(self, project_dir: Path = None):
+        self.project_dir = project_dir or Path.cwd()
+        self.prp_dir = self.project_dir / '.prp'
+        self.state_file = self.prp_dir / 'state.yaml'
+        self._state = None
+    
+    @property
+    def exists(self) -> bool:
+        return self.state_file.exists()
+    
+    def load(self) -> Dict[str, Any]:
+        """Load state from file, return empty state if doesn't exist"""
+        if not self.exists:
+            return self._default_state()
+        
+        try:
+            with open(self.state_file, 'r') as f:
+                self._state = yaml.safe_load(f) or self._default_state()
+                return self._state
+        except Exception as e:
+            print(f"{c.RED}Error reading .prp/state.yaml: {e}{c.RESET}")
+            return self._default_state()
+    
+    def save(self, state: Dict[str, Any]):
+        """Save state to file"""
+        self.prp_dir.mkdir(exist_ok=True)
+        try:
+            with open(self.state_file, 'w') as f:
+                yaml.dump(state, f, default_flow_style=False, sort_keys=False)
+            self._state = state
+        except Exception as e:
+            print(f"{c.RED}Error writing .prp/state.yaml: {e}{c.RESET}")
+            sys.exit(1)
+    
+    def _default_state(self) -> Dict[str, Any]:
+        return {
+            'project': {
+                'name': '',
+                'package_name': '',
+                'created': '',
+                'platform': 'debian'
+            },
+            'dependencies': [],
+            'tentative': [],
+            'cleanup': [],
+            'meta_package': {
+                'version': '1.0',
+                'maintainer': 'Auto Generated <noreply@localhost>',
+                'installed': False,
+                'last_built': None
+            }
+        }
+
+class DebianPlatform:
+    """Debian/Ubuntu platform implementation"""
+    
+    @staticmethod
+    def is_available() -> bool:
+        return Path('/etc/debian_version').exists()
+    
+    def build_meta_package(self, name: str, deps: List[str], version: str, maintainer: str) -> Path:
+        """Build meta-package using equivs-build"""
+        if not deps:
+            raise ValueError("No dependencies to package")
+        
+        # Create control file
+        control_content = f"""Section: misc
+Priority: optional
+Standards-Version: 4.1.4
+
+Package: {name}
+Version: {version}
+Maintainer: {maintainer}
+Depends: {', '.join(deps)}
+Description: Auto-generated meta-package for project dependencies
+ This package pulls in all required dependencies for the project.
+"""
+        
+        control_file = Path(f"{name}.control")
+        with open(control_file, 'w') as f:
+            f.write(control_content)
+        
+        try:
+            # Build the package
+            result = subprocess.run(['equivs-build', str(control_file)], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"equivs-build failed: {result.stderr}")
+            
+            # Find the generated .deb file
+            deb_files = list(Path('.').glob(f"{name}_*.deb"))
+            if not deb_files:
+                raise RuntimeError("No .deb file generated")
+            
+            return deb_files[0]
+        finally:
+            # Clean up control file
+            if control_file.exists():
+                control_file.unlink()
+    
+    def install_package(self, deb_file: Path):
+        """Install a .deb package"""
+        cmd = ['sudo', 'dpkg', '-i', str(deb_file)]
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            print(f"{c.YELLOW}Running apt-get install -f to fix dependencies...{c.RESET}")
+            subprocess.run(['sudo', 'apt-get', 'install', '-f'])
+    
+    def remove_package(self, package_name: str):
+        """Remove a package"""
+        cmd = ['sudo', 'apt-get', 'remove', package_name]
+        subprocess.run(cmd)
+    
+    def mark_auto(self, packages: List[str]):
+        """Mark packages as automatically installed"""
+        if packages:
+            cmd = ['sudo', 'apt-mark', 'auto'] + packages
+            subprocess.run(cmd)
+
+class PRP:
+    """Main PRP application"""
+    
+    def __init__(self):
+        self.state_manager = PRPState()
+        self.platform = DebianPlatform() if DebianPlatform.is_available() else None
+        if not self.platform:
+            print(f"{c.RED}Error: Only Debian/Ubuntu systems are currently supported{c.RESET}")
+            sys.exit(1)
+    
+    def cmd_new(self, project_name: str):
+        """Create new project"""
+        if self.state_manager.exists:
+            print(f"{c.RED}Error: .prp/ already exists{c.RESET}")
+            print(f"{c.DIM}Hint: Use 'prp s' to see current project or 'rm -rf .prp' to start over{c.RESET}")
+            return
+        
+        package_name = f"{project_name}-deps"
+        state = self.state_manager.load()
+        state['project'].update({
+            'name': project_name,
+            'package_name': package_name,
+            'created': datetime.now().isoformat(),
+            'platform': 'debian'
+        })
+        
+        self.state_manager.save(state)
+        
+        print(f"{c.GREEN}Set '{project_name}' as current project name for equivs/dependencies.{c.RESET}")
+        print(f"{c.BLUE}System detected as Debian.{c.RESET}")
+        print(f"{c.BLUE}Package named appropriately as '{package_name}'{c.RESET}")
+        print(f"{c.GREEN}Created: ./.prp/state.yaml{c.RESET}")
+    
+    def cmd_add(self, package_name: str):
+        """Add package to dependencies"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
+            return
+        
+        # Move from tentative if it was there
+        if package_name in state['tentative']:
+            state['tentative'].remove(package_name)
+            print(f"{c.YELLOW}{package_name} moved from tentative to dependencies{c.RESET}")
+        
+        if package_name not in state['dependencies']:
+            state['dependencies'].append(package_name)
+            print(f"{c.GREEN}{package_name} added to dependencies{c.RESET}")
+        else:
+            print(f"{c.YELLOW}{package_name} already in dependencies{c.RESET}")
+        
+        self.state_manager.save(state)
+    
+    def cmd_remove(self, package_name: str):
+        """Remove package from dependencies and mark for cleanup"""
+        state = self.state_manager.load()
+        
+        if package_name in state['dependencies']:
+            state['dependencies'].remove(package_name)
+            print(f"{c.YELLOW}{package_name} removed from dependencies{c.RESET}")
+        
+        if package_name in state['tentative']:
+            state['tentative'].remove(package_name)
+            print(f"{c.YELLOW}{package_name} removed from tentative{c.RESET}")
+        
+        if package_name not in state['cleanup']:
+            state['cleanup'].append(package_name)
+            print(f"{c.BLUE}{package_name} added to cleanup list (will be marked auto on next install){c.RESET}")
+        
+        self.state_manager.save(state)
+    
+    def cmd_eval(self, package_name: str):
+        """Add package to tentative list (evaluating)"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
+            return
+        
+        if package_name not in state['tentative']:
+            state['tentative'].append(package_name)
+            print(f"{c.CYAN}Adding {package_name} to tentative list (evaluating){c.RESET}")
+            print(f"{c.DIM}Use 'prp a {package_name}' to confirm or 'prp r {package_name}' to remove{c.RESET}")
+        else:
+            print(f"{c.YELLOW}{package_name} already in tentative list{c.RESET}")
+        
+        self.state_manager.save(state)
+    
+    def cmd_status(self):
+        """Show current project status"""
+        if not self.state_manager.exists:
+            print(f"{c.RED}No .prp project found in current directory{c.RESET}")
+            print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' to create a project{c.RESET}")
+            return
+        
+        state = self.state_manager.load()
+        project = state['project']
+        
+        print(f"\n{c.BOLD}{c.CYAN}Project: {project['name']}{c.RESET}")
+        print(f"{c.BLUE}Package: {project['package_name']}{c.RESET}")
+        
+        # Dependencies
+        deps = state['dependencies']
+        if deps:
+            print(f"\n{c.BOLD}{c.GREEN}Dependencies ({len(deps)}):{c.RESET}")
+            for dep in deps:
+                print(f"  {c.GREEN}✓{c.RESET} {dep}")
+        
+        # Tentative
+        tentative = state['tentative']
+        if tentative:
+            print(f"\n{c.BOLD}{c.YELLOW}Tentative ({len(tentative)}):{c.RESET}")
+            for pkg in tentative:
+                print(f"  {c.YELLOW}?{c.RESET} {pkg}")
+        
+        # Cleanup
+        cleanup = state['cleanup']
+        if cleanup:
+            print(f"\n{c.BOLD}{c.MAGENTA}Cleanup ({len(cleanup)}):{c.RESET}")
+            for pkg in cleanup:
+                print(f"  {c.MAGENTA}×{c.RESET} {pkg}")
+        
+        # Meta-package status
+        meta = state['meta_package']
+        status = f"{c.GREEN}✓ installed{c.RESET}" if meta['installed'] else f"{c.RED}✗ not installed{c.RESET}"
+        print(f"\n{c.BOLD}Meta-package:{c.RESET} {status}")
+        
+        if not deps and not tentative:
+            print(f"\n{c.DIM}No dependencies tracked yet.{c.RESET}")
+            print(f"{c.DIM}Use 'prp a PACKAGE' to add dependencies{c.RESET}")
+        
+        print()
+    
+    def cmd_install(self):
+        """Build and install meta-package"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            return
+        
+        deps = state['dependencies']
+        if not deps:
+            print(f"{c.RED}Error: No dependencies to install{c.RESET}")
+            print(f"{c.DIM}Hint: Use 'prp a PACKAGE' to add dependencies first{c.RESET}")
+            return
+        
+        package_name = state['project']['package_name']
+        version = state['meta_package']['version']
+        maintainer = state['meta_package']['maintainer']
+        
+        print(f"{c.BLUE}Creating meta-package {package_name}...{c.RESET}")
+        
+        try:
+            # Mark cleanup packages as auto
+            cleanup = state['cleanup']
+            if cleanup:
+                print(f"{c.YELLOW}Marking cleanup packages as auto: {', '.join(cleanup)}{c.RESET}")
+                self.platform.mark_auto(cleanup)
+                state['cleanup'] = []
+            
+            # Build meta-package
+            deb_file = self.platform.build_meta_package(package_name, deps, version, maintainer)
+            print(f"{c.GREEN}Built: {deb_file}{c.RESET}")
+            
+            # Install meta-package
+            print(f"{c.BLUE}Installing {package_name}...{c.RESET}")
+            self.platform.install_package(deb_file)
+            
+            # Update state
+            state['meta_package']['installed'] = True
+            state['meta_package']['last_built'] = datetime.now().isoformat()
+            self.state_manager.save(state)
+            
+            print(f"{c.GREEN}Done. Meta-package installed successfully!{c.RESET}")
+            
+            # Clean up .deb file
+            deb_file.unlink()
+            
+        except Exception as e:
+            print(f"{c.RED}Error: {e}{c.RESET}")
+    
+    def cmd_remove(self):
+        """Remove meta-package and cleanup"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            return
+        
+        package_name = state['project']['package_name']
+        
+        if not state['meta_package']['installed']:
+            print(f"{c.YELLOW}Meta-package not installed{c.RESET}")
+        else:
+            print(f"{c.BLUE}Removing {package_name}...{c.RESET}")
+            self.platform.remove_package(package_name)
+            
+            # Mark tracked packages as auto
+            all_packages = state['dependencies'] + state['tentative']
+            if all_packages:
+                print(f"{c.YELLOW}Marking tracked packages as auto...{c.RESET}")
+                self.platform.mark_auto(all_packages)
+            
+            state['meta_package']['installed'] = False
+            self.state_manager.save(state)
+            
+            print(f"{c.GREEN}Done. Packages marked as auto-removable.{c.RESET}")
+            print(f"{c.DIM}Run 'sudo apt autoremove' to clean up unused packages{c.RESET}")
+
+def show_help():
+    """Show beautiful help output"""
+    help_text = f"""
+{c.BOLD}{c.CYAN}PRP - Project Requirements Packager{c.RESET}
+{c.DIM}A beautiful, minimal tool for tracking project dependencies{c.RESET}
+
+{c.BOLD}Commands:{c.RESET}
+  {c.BGREEN}n, new{c.RESET} PROJECT_NAME    Create new project
+  {c.BGREEN}a, add{c.RESET} PACKAGE         Add package to dependencies  
+  {c.BGREEN}r, remove{c.RESET} PACKAGE      Remove from dependencies & mark for cleanup
+  {c.BGREEN}e, eval{c.RESET} PACKAGE        Add to tentative list (evaluating)
+  {c.BGREEN}s, status{c.RESET}              Show current project status
+  {c.BGREEN}install{c.RESET}                Build & install meta-package
+  {c.BGREEN}uninstall{c.RESET}              Remove meta-package & cleanup
+
+{c.BOLD}Example workflow:{c.RESET}
+  {c.CYAN}$ prp n mediapipe{c.RESET}                   {c.DIM}# Start new project{c.RESET}
+  {c.CYAN}$ sudo apt install libjpeg9{c.RESET}         {c.DIM}# Install manually to test{c.RESET}
+  {c.CYAN}$ prp e libjpeg9{c.RESET}                    {c.DIM}# Mark as evaluating{c.RESET}
+  {c.CYAN}$ prp a libjpeg9{c.RESET}                    {c.DIM}# Confirm as dependency{c.RESET}
+  {c.CYAN}$ prp install{c.RESET}                       {c.DIM}# Create & install meta-package{c.RESET}
+
+{c.DIM}State stored in ./.prp/state.yaml{c.RESET}
+"""
+    print(help_text)
+
+def main():
+    if len(sys.argv) == 1:
+        show_help()
+        return
+    
+    prp = PRP()
+    
+    command = sys.argv[1].lower()
+    
+    # Command aliases
+    if command in ['n', 'new']:
+        if len(sys.argv) < 3:
+            print(f"{c.RED}Error: Project name required{c.RESET}")
+            print(f"{c.DIM}Usage: prp n PROJECT_NAME{c.RESET}")
+            return
+        prp.cmd_new(sys.argv[2])
+    
+    elif command in ['a', 'add']:
+        if len(sys.argv) < 3:
+            print(f"{c.RED}Error: Package name required{c.RESET}")
+            print(f"{c.DIM}Usage: prp a PACKAGE{c.RESET}")
+            return
+        prp.cmd_add(sys.argv[2])
+    
+    elif command in ['r', 'remove']:
+        if len(sys.argv) < 3:
+            print(f"{c.RED}Error: Package name required{c.RESET}")
+            print(f"{c.DIM}Usage: prp r PACKAGE{c.RESET}")
+            return
+        prp.cmd_remove(sys.argv[2])
+    
+    elif command in ['e', 'eval']:
+        if len(sys.argv) < 3:
+            print(f"{c.RED}Error: Package name required{c.RESET}")
+            print(f"{c.DIM}Usage: prp e PACKAGE{c.RESET}")
+            return
+        prp.cmd_eval(sys.argv[2])
+    
+    elif command in ['s', 'status']:
+        prp.cmd_status()
+    
+    elif command == 'install':
+        prp.cmd_install()
+    
+    elif command == 'uninstall':
+        prp.cmd_remove()
+    
+    else:
+        print(f"{c.RED}Unknown command: {command}{c.RESET}")
+        show_help()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{c.YELLOW}Interrupted{c.RESET}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"{c.RED}Unexpected error: {e}{c.RESET}")
+        sys.exit(1)

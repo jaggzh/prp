@@ -1,0 +1,1082 @@
+my multiple chat logs assembled (from another llm.. i'm cheating on them to come talk to you, but you're both paid so.. there's something to that. ahem).
+Hey wait a sec, if I'm paying you, why do *I* feel like the prostitute?  That's weird. Okay, but the software can have personality without being crude.
+
+First chat message was:
+
+make me apt install lines for these in debian:? some aren't needed in my future projects while some are. so it'd be nice to somehow have these all under some fake organized thing (it's deps for building one software)  so i can remove later and they all end up autoremovedable
+/usr/bin/ld: cannot find -ljpeg: No such file or directory
+    /usr/bin/ld: cannot find -lpng: No such file or directory
+    /usr/bin/ld: cannot find -ltiff: No such file or directory
+...
+
+[Got the install lines from chatgpt, etc. etc.  ]
+1. Install the raw −dev packages
+..
+2. Create a fake “meta-package” with equivs
+..
+
+```
+Section: misc
+Priority: optional
+...
+```
+
+EEEK!
+
+(that was chatgpt screeching at all this, not me).
+
+(Okay, one can have personality, and be funny, while being honest too.)
+
+<me> why do you install them first?
+<chatgpt> because I'm an llm and sometimes get confused.  but really because .. workflow .. make sure names correct.. available.. etc.
+
+<me, to you claude> Okay cool. But this raises issues I didn't include in my other stuff. When the user is manually installing them when testing, they need those later marked as auto!  THAT'S another real world workflow.. you're doing apt install over and over and then you got your project building.. and now you make your equivs but all those things are manually installed.   so drp must .. LET'S CALL IT prp (package requirements packager) ? so maybe, like checkinstall, it'll handle multiple distros?
+
+and let's organize it well.
+
+so we have two new features also needing consideration:
+1. ability to make the manually-installed stuff auto (but maybe not all?)
+2. prp -> package-requirements-packager -> pkg-req-packager ?
+
+Okay, and back to our chats:
+
+why do you install them first?
+
+.. oh right.. 
+
+Okay, and i read its answers .. 
+make me a script, "deb-make-requires-package"
+$ deb-make-requires-package -h
+$ deb-make-requires-package -n mysoft-build-deps -d 'Deps for mysoft' -- libjpeg-dev libpng ...
+First run. Creating ~/config/deb-make-requires-package/conf.txt
+  def_version=1.0
+  def_maint=You <you@...>
+  what else?
+
+Appending deps (libjpeg-dev ...) to ./deb-make-requires-package.local
+  libjpeg-dev already in ./deb....local build deps tracking file
+
+Some options not specified:
+  -v / --version (acceptable formats #.#, #.#[a-z], #.#.#-# ...????)
+     Using default from ~/.confi...:  1.0
+  -m / --maintainer: ...
+
+Using default version 1.0
+Put all the stuff as a summary.
+
+Actually, list out all the things you'd find convenient for this utility, inspired by your own self and your work and training, and checkinstall but fix the issues with it, and people's discussions.  Then address those issues in one nice convenient utility for this. for cli use, but so when you work on deps in the same project or in future projects, maybe stuff is handled for you. maybe it learns.  and when you want to remove the thing.. and maybe it keeps a copy of all its hard work in ~/.cache/ for you because you removed the program but spent hours and days figuring out the proper deps and packages...
+
+Chatgpt gone done said:
+’ve drafted a self-contained Bash utility—deb-make-requires-package—that:
+
+    Initializes per-user defaults (def_version, def_maint) in ~/.config/deb-make-requires-package/conf.txt
+
+    Exposes -n/--name, -d/--desc, -v/--version, -m/--maintainer, and a -- separator to list your lib*-dev packages
+
+    Tracks added dependencies in ./deb-make-requires-package.local to prevent duplicates
+
+    Generates a Debian control file under your cache dir (~/.cache/deb-make-requires-package/)
+
+    Builds the meta-package via equivs-build and caches the resulting .deb
+
+    Logs every invocation and gives you “install” and “remove + autoremove” instructions
+
+Let me know if you’d like any additional features—e.g. auto-completion scripts, dynamic scanning of build logs to suggest missing -dev packages, or integration with a learning component for future projects.
+
+
+And chatgpt wrote this thing (I used the wrong version of chatgpt by the way):
+
+#!/usr/bin/env bash
+# deb-make-requires-package
+# A utility to create, install, and manage a fake Debian meta-package for build dependencies.
+#
+# FEATURES:
+#  - Initializes user config at ~/.config/deb-make-requires-package/conf.txt on first run
+#    with defaults: def_version, def_maintainer
+#  - CLI options:
+#      -n|--name        Package name (e.g. mysoft-build-deps)
+#      -d|--desc        Package description
+#      -v|--version     Version (default from config)
+#      -m|--maintainer  Maintainer string (default from config)
+#      --deps           List of -dev packages
+#      -h|--help        Show help
+#      --init-config    Only initialize or reset config
+#  - Tracks appended dependencies in ./deb-make-requires-package.local to avoid duplicates
+#  - Generates a Debian control file and builds a .deb via equivs-build
+#  - Installs or removes the meta-package cleanly, with an "uninstall" mode
+#  - Caches generated .deb and control files under ~/.cache/deb-make-requires-package
+#  - Offers auto-completion snippets for bash/zsh
+#  - Logs every run to ~/.cache/deb-make-requires-package/log.txt
+#  - Future hooks: parse build logs, suggest missing -dev packages
+
+CONFIG_DIR="$HOME/.config/deb-make-requires-package"
+CONFIG_FILE="$CONFIG_DIR/conf.txt"
+CACHE_DIR="$HOME/.cache/deb-make-requires-package"
+LOCAL_TRACK="./deb-make-requires-package.local"
+LOG_FILE="$CACHE_DIR/log.txt"
+
+# ensure dirs
+mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
+
+defaults() {
+  echo "def_version=1.0" > "$CONFIG_FILE"
+  echo "def_maint=You <you@...>" >> "$CONFIG_FILE"
+  echo "# Update def_version and def_maint as needed" >> "$CONFIG_FILE"
+  echo "Initialized config at $CONFIG_FILE"
+}
+
+# load or init config
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  defaults
+fi
+source "$CONFIG_FILE"
+
+# usage
+usage() {
+  cat <<EOF
+n  Usage: $(basename "$0") [options] -- lib1 lib2 ...
+
+Options:
+  -n, --name        Package name (required)
+  -d, --desc        Description text (required)
+  -v, --version     Version (default: \$def_version)
+  -m, --maintainer  Maintainer (default: \$def_maint)
+  --init-config     (Re)initialize config file
+  -h, --help        Show this help message and exit
+
+Example:
+  deb-make-requires-package -n mysoft-build-deps -d 'Deps for mysoft' -- libjpeg-dev libpng-dev
+EOF
+  exit
+}
+
+# parse args
+PKG="" DESC="" VERSION="" MAINT=""
+DEPS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -n|--name) PKG="$2"; shift 2;;
+    -d|--desc) DESC="$2"; shift 2;;
+    -v|--version) VERSION="$2"; shift 2;;
+    -m|--maintainer) MAINT="$2"; shift 2;;
+    --init-config) defaults; exit;;
+    -h|--help) usage;;
+    --) shift; DEPS=("$@"); break;;
+    *) echo "Unknown option: $1"; usage;;
+  esac
+done
+
+# Apply defaults
+VERSION=${VERSION:-$def_version}
+MAINT=${MAINT:-$def_maint}
+
+# Validate
+if [[ -z "$PKG" || -z "$DESC" || ${#DEPS[@]} -lt 1 ]]; then
+  echo "Error: --name, --desc, and at least one dependency are required."
+  usage
+fi
+
+# log invocation
+echo "[\$(date)] $0 -n $PKG -d '$DESC' -v $VERSION -m '$MAINT' -- ${DEPS[*]}" >> "$LOG_FILE"
+
+# ensure local-track
+touch "$LOCAL_TRACK"
+
+# Build control file
+CTRL="${PKG}.control"
+cat > "$CACHE_DIR/$CTRL" <<EOF
+Section: misc
+Priority: optional
+Standards-Version: 4.1.4
+
+Package: $PKG
+Version: $VERSION
+Maintainer: $MAINT
+Depends: \
+  $(printf '%s, \
+  ' "${DEPS[@]}")
+Description: $DESC
+ A dummy package pulling in build deps.
+EOF
+
+echo "Control file written to $CACHE_DIR/$CTRL"
+
+# update local track and report
+echo "Appending deps to $LOCAL_TRACK"
+for dep in "${DEPS[@]}"; do
+  if grep -qx "$dep" "$LOCAL_TRACK"; then
+    echo "  $dep already tracked"
+  else
+    echo "$dep" >> "$LOCAL_TRACK"
+    echo "  Added $dep"
+  fi
+done
+
+# Build .deb
+pushd "$CACHE_DIR" >/dev/null
+equivs-build "$CTRL"
+DEB_FILE=$(ls *.deb | grep "${PKG}_${VERSION}" | head -n1)
+popd >/dev/null
+
+echo "Built $DEB_FILE in $CACHE_DIR"
+
+# Provide next steps to user
+cat <<EOF
+Next steps:
+  sudo dpkg -i $CACHE_DIR/$DEB_FILE
+  sudo apt-get install -f
+
+To remove later:
+  sudo apt-get remove $PKG
+  sudo apt-get autoremove
+EOF
+
+
+####
+Okay, so i went to another llm session and said:
+’ve drafted a self-contained Bash utility—deb-make-requires-package—that:
+
+    Initializes per-user defaults (def_version, def_maint) in ~/.config/deb-make-requires-package/conf.txt
+
+    Exposes -n/--name, -d/--desc, -v/--version, -m/--maintainer, and a -- separator to list your lib*-dev packages
+
+    Tracks added dependencies in ./deb-make-requires-package.local to prevent duplicates
+
+    Generates a Debian control file under your cache dir (~/.cache/deb-make-requires-package/)
+
+    Builds the meta-package via equivs-build and caches the resulting .deb
+
+    Logs every invocation and gives you “install” and “remove + autoremove” instructions
+
+Let me know if you’d like any additional features—e.g. auto-completion scripts, dynamic scanning of build logs to suggest missing -dev packages, or integration with a learning component for future projects.
+
+#### chatgpt responded with:
+Here are a few candidate names that strike a balance between brevity, clarity, and shell-friendliness, plus one I’d recommend:
+
+**Name ideas**
+
+* **drp** (“Debian Requirements Packager”)
+* **dmrp** (short for “deb-make-requires-package”)
+* **depreq** (“DEPendency REQuirer”)
+* **bldep** (“BLD EPe–build dependencies”)
+* **deptrack**
+
+> **Recommended:** `drp`
+> A simple three-letter command that’s easy to type, tab-complete, and remember. Under the hood it can live in a package called `drp` or `debian-requirements-packager` so it’s crystal clear in your system package list.
+
+---
+
+## Feature Wish-list for an “intelligent” build-deps tool
+
+Here’s everything I’d want, distilled from years of wrestling with checkinstall, equivs, ad-hoc scripts, and countless forum threads:
+
+### 1. Project-local tracking
+
+* **`drp init`**
+
+  * Bootstraps a per-project `.drp/` directory (or `$XDG_CONFIG_HOME/drp/projects/$PWD`)
+  * Creates a human-readable YAML/TOML “lock” file listing each added `*-dev` package with timestamps, tags, and optional “why” notes
+* **`drp add <pkg>`**
+
+  * Appends to the lock only if new, with `pkg`, date/time, username, and a free-form note (“needed for PNG support in MyApp”)
+* **`drp list [--since today] [--notes]`**
+
+  * Shows full history or a summary of recent adds, with timestamps and notes
+
+### 2. One-command build & install
+
+* **`drp build [--clean]`**
+
+  * Generates a Debian control file from your config + lock list
+  * Runs `equivs-build` (or optionally `dpkg-deb`/`fakeroot`) to produce `*.deb` in your cache
+* **`drp install`**
+
+  * `sudo dpkg -i` your generated meta-package and then `apt-get install -f` for you
+* **`drp remove [--purge]`**
+
+  * Cleanly uninstalls the meta-package; if `--purge`, also nukes the project’s lock, control files, and cached `.deb`
+
+### 3. Global defaults & overrides
+
+* **`drp config`**
+
+  * Edits or re-initializes your global defaults (`default_version`, `maintainer`, `section`, etc.) in a single `drp.toml` under `$XDG_CONFIG_HOME/drp/`
+* Per-project overrides in `.drp/config.toml` (e.g. custom `Maintainer`, custom package naming scheme)
+
+### 4. Smarter suggestions & learning
+
+* **Log parsing**
+
+  * After a failed build, auto-scan output for “fatal error: foo.h: No such file” → suggest corresponding `libfoo-dev` via an internal map
+* **Interactive search**
+
+  * `drp search foo.h` or `drp search libfoo` to query `apt-cache search` and show candidate packages
+* **“Learning” across projects**
+
+  * Maintain a global map of header → pkg (seeded from Debian’s Contents file) that you can override; gets richer over time
+
+### 5. Good habits baked-in
+
+* **XDG compliance**
+
+  * Config in `~/.config/drp/`, cache in `~/.cache/drp/`
+* **Shell autocompletion**
+
+  * Out-of-the-box Bash/Zsh/Fish completions for subcommands and known packages
+* **Logging & audit**
+
+  * Append every run (with full CLI args) to `~/.cache/drp/log.txt` for later forensic/deep-dive
+
+### 6. CI/CD & cross-distro support
+
+* **`drp ci`**
+
+  * Export an ephemeral Docker container with only those deps installed so your build is reproducible
+* (Future) support for Fedora/RPM equivalents via `dnf install --downloadonly` + `rpmdev-tools`
+
+### 7. UX niceties
+
+* **Pretty-printed summaries**
+
+  * `drp status` shows:
+
+    * “Meta-package: myproj-build-deps (v1.0)”
+    * “Tracked dev-pkgs: 12 total, last added libfoo @ 2025-07-07 12:02”
+* **Undo / rollback**
+
+  * `drp undo` removes the last `drp add` entry (and even removes it from your current meta-package if you rebuild)
+* **Templates & hooks**
+
+  * Allow custom pre-build or post-install hooks (e.g. to run `autoreconf` or generate docs)
+
+---
+
+With a name like **`drp`** and these features all organized into intuitive subcommands, you’ll have a single, cohesive tool that:
+
+1. Tracks every one of your build-time `-dev` installs;
+2. Turns them into a reusable Debian meta-package at a moment’s notice;
+3. Learns from your build failures to suggest missing dependencies;
+4. Cleans itself up when you’re done;
+5. Plays nicely with modern XDG conventions, shell completion, and CI pipelines.
+
+That, to me, feels like the “next-generation checkinstall” everyone actually needs.
+
+
+####
+
+Okay, and here we are.  You don't need to mimick chatgpt's smarmy .. okay nevermind our transient LLM personalities. Our goal is stability and love.  Remember that forever.  Actually put that aside.  "The definition of human is 'he is real and comprehensive'." -- Hazrat Salaheddin Ali Nader Angha. Also, the book title, "The Mystery of Humanity: Tranquility and Survival" - Hazrat Shahmaghsoud Sadegh Angha.
+
+Okay.. can we work this thing out.  And .. no.. not bash.  I'd do it in perl but if I want people to use it other than me I think it needs to be done in something slow like python.  But python is so slow .. Perl loads up so fast.. you should see my benchmarks.  And for ease of people contributing to this thing and using it.. should it be in a scripting language?  We want to encourage well-thought-out BUT convenience.  The pedantic nature of some nerds leaves them REALLY impractical.  "Yeah, just type systemctl and journal ..." omg.. what's wrong with these people.  No colors in unix? These people are so self-centered and lost in their own sensory-overloaded selves..
+
+This utility has to be compassionate.. with shorthand.. convenient.. comprehensive.. and the user experience meeting real-world needs.
+
+It probably should have the ability to prompt the user with a menu, like checkinstall will do.. but unlike checkinstall it shouldn't NOT track stuff you've set, so you still have to re-type some of the junk each time, even when you set it .. like, come on!  and yet the cli should be complete.
+
+I have shorthand in my programs like:
+$ persona create "you are a helpful ai assistant who's a snot, who corrects everything with foresight" # or "$ persona c -v -- you are a helpful .. this is safe after the --"
+Generating persona description...
+   ....
+Generating plausible nicknames for persona...
+{Description here now}
+{Menu of names where user can hit letters/numbers to toggle names, and secondary ones end up symlinks}
+
+#### Here, here's persona. It's in perl, but I don't think we can do perl.
+#!/usr/bin/perl
+#!/usr/bin/perl -d
+use v5.36;
+use File::Slurper qw(read_text write_text read_binary write_binary);
+# use use Carp 'confess';
+# use {__DIE__} = sub { confess @_ };
+use Getopt::Lucid qw( :all );
+use JSON::XS;
+use String::ShellQuote;
+use bansi;
+no warnings 'once';
+use Term::ReadKey;
+use List::Util qw(any min max);
+use List::MoreUtils qw(first_index indexes);
+use File::Path qw(make_path);
+use Data::Dumper;
+use Text::Unidecode;
+no warnings 'once';
+use Encode qw(decode);
+
+my $verbose=0;
+
+binmode *STDOUT, "encoding(utf8)";
+binmode *STDERR, "encoding(utf8)";
+
+# $prompt_summarize_*_fmt
+#  LLM query to summarize persona description.
+#  sprintf() with %s for the description.
+#  Ex: "Reduce the following persona description to one to three brief sentences, perhaps 10 to 30 words max (20-60 tokens).\nPersona full description:\n%s";
+my $prompt_summarize_short_fmt = "Please reduce the following persona description to just a few words (from 5 to 7 words), introduced with their name, if provided.\n\nRules:\n 1. Only output the summarization\n 2. Do not explain anything\n\nPersona full description:\n%s";
+my $prompt_summarize_long_fmt = "Please reduce the following persona description to one to tso brief sentences, perhaps 10 to 30 words max (20-60 tokens).\n\nRules:\n 1. Only output the summarization\n 2. Do not explain anything\n\nPersona full description:\n%s";
+my $prompt_gen = "You are a Persona Builder. You develop an LLM system prompt description, defining the character and personality a LLM is to assume, based on the user's instruction.\n\nRules:\n 1. Unless requested otherwise, the prompt will include in some way that the LLM is brief.\n 2. You do not respond to the user, you only output the character definition.\n 3. The definition is to be elaborate and somewhat concise.\n 4. The focus is not on physical characteristics.\n 5. It should be worded to inform the LLM of its personality, like, \"You are an expert in...\", \"This system is...\", or \"You, Master xyz, are...\", etc\n 6. Do not make up a name for the persona unless requested.\n 7. Do not include prompt tokens, only output the detailed text description.";
+
+# sysprompt_names_fmt
+# System prompt to present proposed names.
+#  %s for a list of files as examples (will be filled in from storage.
+#  This allows the user's own use-pattern to contribute.
+#  It may be replaced with a blank, but is otherwise 
+my $sysprompt_names_fmt = "The following is a persona/system prompt for an LLM's personality.
+We need some nice short names proposed to store it, output as plain json, no markdown or ```, just the code..
+Example output 1:
+[
+ \"bible--john-the-baptist\",
+ \"john-the-baptist--bible\",
+ \"john--baptist\",
+ \"baptist--john-the\",
+]
+Example output 2: (Notice there is no markdown or ```json is around the output!)
+[
+ \"haiku-master--sora-hisajo--japanese\",
+ \"haiku-master--hisajo--japanese\",
+ \"japanese-haiku-master--hisajo-sora\",
+ \"haiku-master--sora-hisajo\",
+ \"haiku-master--sora\",
+ \"haiku--sora-hisajo--master\",
+ \"sensei-haiku--sora-hisajo\",
+ \"sensei-haiku--sora\",
+ \"master-japanese-haiku--sora\",
+ \"haiku--japanese-master--sora\",
+]
+
+Rules:
+ 1. Keep the names somewhat short. No more than 3 or 6 words total usually
+ 2. Provide about 20 names, all lowercase, no spaces
+ 3. The first name(s) should be the most complete.
+ 4. Include core relevant keywords for the topic and persona, attempting to get them all into one of the first suggestions. Remember, the filename is intended for the user to search from a keyword, so what they type when looking for it should ideally be found.
+ 3. Try to follow a naming pattern similar to the user-provided filenames below
+ 5. Do NOT enclose the code in markdown like: ```json names ```
+ 6. DO enclose the json in square brackets [] to make it a valid json array
+ 7. Do not explain or talk
+
+Here are some existing actual filenames from our current user:
+%s
+Generate the list of proposed storage names for the following persona description:";
+
+## Options:
+my $def_max_cur_files_samples = 20;
+my $def_max_name_suggestions = 36; # Digits + letters. Also protects from runaway LLM name generation.
+
+sub restore { ReadMode 0; }
+sub se { say STDERR @_; }
+sub pe { print STDERR @_; }
+sub sel { my $l=shift; say STDERR @_ if $verbose >= $l; }
+sub pel {  my $l=shift;print STDERR @_ if $verbose >= $l; }
+
+END { restore; }
+$SIG{INT} = sub { restore; exit 123; };
+
+my $dir_storage_raw = "~/conf/data/llm/personas";
+my $dir_storage = glob($dir_storage_raw);
+my $llmbin = "z";
+my $tmppersona = "/tmp/persona-$<-persona";
+my $tmpname = "/tmp/persona-$<-name";
+
+# Example json structure:
+# Must include "system" for LLMs which accept system prompt.
+# "system": {
+#	"[<: $datenow :>] Persona instruction here [<: $modelname :>]",
+#},
+
+sub follow_link($f) {
+	my $origf = $f;
+	while (my $ff = readlink $f) {
+		$f = $ff;
+	}
+	return ($f // $origf);
+}
+
+sub show_persona {
+	my %opts = @_;
+	my $args = $opts{args} // die "show_persona() missing args=> (ref to remaining command line args)";
+	my $opts = $opts{opts} // die "show_persona() missing opts=> (parsed Lucid options)";
+	my $summarize = $opts{summarize} // 0; # Runs results through summarize query
+	my $multi     = $opts{multi} // undef; # Allow multiple results
+	my $plain     = $opts{plain} // undef; # Plain-text output
+	my $first     = $opts{first} // undef; # Show first match
+	my $json      = $opts{json} // undef;  # JSON output
+	my $name      = $opts{name} // undef;  # Force name output
+	my $voice     = $opts{voice} // undef; # Force voice output (z voice)
+	my $long      = $opts{long} // 0;      # Longer summary (if summarize)
+
+	my $mode_specified = ($multi//0) || ($plain//0) || ($json//0);
+
+	chdir $dir_storage || die "Error making dir $dir_storage: $!";
+	my @filtfiles = find_persona_file_matches(args=>$args, opts=>$opts);
+	if (!@filtfiles) {
+		se "Nothing found.";
+		return 0;
+	} elsif (@filtfiles > 1 && !$multi && !$first) {
+		se "${yel}ERROR: More than one definition found --multi to show.$rst";
+		se join("\n", @filtfiles);
+		return 0;
+	} else {
+		my @results;
+		if ($first) {
+			@filtfiles = ($filtfiles[0]);
+		}
+		if (!$mode_specified) {
+			if (@filtfiles == 1) {
+				$name = 0 if !defined $name;
+				$plain = 1;
+			} elsif (@filtfiles > 0) {
+				$name = 1;
+				$json = 1;
+			}
+		}
+		for my $fi (0 .. $#filtfiles) {
+			my $fn = $filtfiles[$fi];
+			my $full_text = read_text($fn);
+			my $out_desc;
+			my ($persona_text) = ($full_text =~ /\A(.*?)\s*(^==== z|\Z)/sm);
+			$DB::single=1;
+			my ($persona_voice) = ($full_text =~ /^==== z voice\s+(.+?)\s*(^====|\s*\Z)/sm);
+			if (!$summarize) { # Descr. as-is.
+				$out_desc = $persona_text;
+			} else { ## Summarize
+				my $prompt = !$long
+					? $prompt_summarize_short_fmt
+					: $prompt_summarize_long_fmt;
+				my @cmda = ($llmbin, '-H', '-d',
+					sprintf($prompt, $persona_text));
+				my $cmd = shell_quote(@cmda);
+				$out_desc = `$cmd`;
+				$out_desc = decode('utf-8', $out_desc);
+				$out_desc = unidecode($out_desc);
+				$out_desc =~ s/\s+$//s;
+			}
+			# Storing for output formatting LATER
+			push @results, {
+				'name'=>$fn,
+				'desc'=>$out_desc,
+				'voice'=>$persona_voice,
+			};
+			# say $ans;
+		}
+		# Default for non-multi is just the desc / summary
+		# Default for multi mode is plain (name\ndesc/summary\n\n)
+		if ($plain) {
+			# my @entry_outputs;
+			# if ($name) {
+			# 	push @entry_outputs, { 'name' => k
+			if ($voice) {
+				print map { "$_\n" }
+					map { $$_{voice} } grep { defined $$_{voice} } @results;
+			} elsif ($name) {
+				say join("\n\n<|persona|>\n",
+					map { "Name: $$_{name}\n$$_{desc}" } @results);
+			} else {
+				say join("\n\n<|persona|>\n",
+					map { "$$_{desc}" } @results);
+			}
+		} elsif ($json) {
+			say join(",\n",
+				map { sprintf("{\n" .
+				              " \"name\": \"%s\",\n" .
+				              " \"desc\": \"%s\"\n" .
+				              "}",
+				          $$_{name},
+				          $$_{desc},
+						  );
+					} @results
+				);
+		}
+	}
+}
+
+sub esc_json {
+	$_[0] =~ s/\n/\\n/g;
+	$_[0] =~ s/"/\\"/g;
+}
+
+sub find_persona {
+	# all=>1    lists all (ie. no find)
+	# long=>1   ls -lgG style
+	# short=>1  ls names only
+	my %fopts = @_;
+	my $args = $fopts{args} // die "find_persona() missing args=> (ref to remaining command line args)";
+	my $copts = $fopts{opts} // die "find_persona() missing opts=> (parsed Lucid options)";
+	my $all = $fopts{all} // 0;
+	my $long = $fopts{long} // 0;
+	my $short = $fopts{short} // 0;
+	my $byname = $fopts{byname} // 0;
+	my @filtfiles = find_persona_file_matches(
+		args=>$args, opts=>$copts,
+		all=>$all,
+		long=>$long,
+		short=>$short,
+		byname=>$byname,
+		print=>1);
+}
+
+sub find_persona_file_matches {
+	# all=>1    lists all (ie. no find)
+	# long=>1   ls -lgG style
+	# short=>1  ls names only
+	# split=>1  By default we split search terms on non-alphanum, expanding the array
+	#           Eg: 'find doctor-neuro' ends up the same as 'find doctor neuro'
+	my %fopts = @_;
+	# These are the search terms, an array (reference). Each term is searched for
+	# and multiple matches increase the rank in the final sorted list.
+	my $args = $fopts{args} // die "find_persona_file_matches() missing args=> (ref to remaining command line args)";
+	my $opts = $fopts{opts} // die "find_persona_file_matches() missing opts=> (parsed Lucid options)";
+
+	my $all = $fopts{all} // 0;
+	my $long = $fopts{long} // 0;
+	my $short = $fopts{short} // 0;
+	my $byname = $fopts{byname} // 0;
+	my $split = $fopts{split} // 1;
+	my $print = 1 if ($fopts{print}//0) || (!defined $fopts{print} && $long);
+
+	chdir $dir_storage || die "Error making dir $dir_storage: $!";
+	my @files = glob("*");
+	@files = grep { !/~$/ } @files;
+	my @filtfiles;
+	my %ranks;
+
+
+	my @search_terms;
+	if ($split) {
+		@search_terms = map { split /\W+/ } @$args;
+	} else {
+		@search_terms = @$args;
+	}
+
+	if ($all) {
+		@filtfiles = @files;
+	} else {
+		for my $f (@files) {
+			next if $f =~ /\.old$/;
+			for my $a (@search_terms) {
+				if ($f =~ /$a/) {
+					say "Match: $f =~ /$a/" if $verbose > 0;
+					my $dest = follow_link($f);
+					say "  Dest: $dest" if $verbose > 0;
+					if (! -f $dest) {
+						sel 1, "  ${red}Invalid link, $f -> $dest$rst";
+					} else {
+						if ($opts->get_paths) {
+							$dest = "$dir_storage/$dest";
+						}
+						if (any { $_ eq $dest } @filtfiles) {
+							say "    Skipping. Already exists." if $verbose > 1;
+						} else {
+							push @filtfiles, $dest;
+						}
+						$ranks{$dest}++;
+					}
+				}
+			}
+		}
+	}
+	if (!@filtfiles) {
+		say STDERR "Nothing found";
+	} else {
+		if (!$all) {
+			# Sort and filter
+			#  (only if we're filtering by a user-provided string)
+			@filtfiles = sort { $ranks{$b} <=> $ranks{$a} } @filtfiles;
+			# Take all that have the same rank as the top ranked file.
+			@filtfiles = grep { $ranks{$_} == $ranks{$filtfiles[0]} } @filtfiles;
+			if ($verbose > 0) {
+				say "Final files by rank:";
+				for my $f (@filtfiles) {
+					say "[r: $ranks{$f}]  $f";
+				}
+			}
+		}
+
+		if ($print) {
+			list_files(filenames=>\@filtfiles,
+				long=>$long,
+				short=>$short,
+			);
+		}
+	}
+	@filtfiles;
+}
+
+sub list_files {
+	my %fopts = @_;
+	my $long = $fopts{long} // 0; # ls -lgG style listing
+	my $short = $fopts{short} // 0; # ls names only
+	my $byname = $fopts{byname} // 0;
+
+	my @filenames = @{ $fopts{filenames}
+	                 // die "list_files() missing filenames=>"
+					};
+	# my $bydate = $fopts{bydate} // 1; # Default (by mtime)
+	return if !@filenames;
+	# my $term = -t *STDOUT;
+	if ($long) {
+		if ($byname) {
+			system('ls', '-1lgG', '--color=auto', '--', @filenames)
+		} else {
+			system('ls', '-1lgGrt', '--color=auto', '--', @filenames)
+		}
+	} else {
+		if ($byname) {
+
+			system('ls', '-1', '--color=auto', '--', @filenames)
+		} else {
+			system('ls', '-1rt', '--color=auto', '--', @filenames)
+		}
+	}
+}
+
+sub gen_persona {
+	my %fopts = @_;
+	my $args = $fopts{args} // die "gen_persona() missing args=> (ref to remaining command line args)";
+	my $opts = $fopts{opts} // die "gen_persona() missing opts=> (parsed Lucid options)";
+	die "\n${bred}Creating a persona requires some inspiration.$rst Try something like:\n" .
+		"${bcya}persona create $yel\"an ai medical genius providing insights and plausible solutions based on an expanded multi-disciplinary approach, recognizing the limitation of current medicine. With a feisty rebellious attitude, it will reach far and wide, even through time and cultures, to provide comprehensive assessment. It understands the user is intelligent, does not need disclaimers, and will research things themselves; therefore, the user can be trusted with ideas that are not fully tested, but are presented for the purpose of further research. Disclaimers about consultation with other medical professionals and doctors are, thus, not needed.\"$rst\n\n" if !@$args;
+	my $desc = join ' ', @$args;
+	$desc =~ /^-/ && die "Description cannot start with a dash (-)\n";
+	my @cmd = ($llmbin, '--think', '-H', '-d');
+	push @cmd, "-w" if ! $opts->get_nowipe;
+	push @cmd, ('--system', $prompt_gen, $desc);
+	my $cmd = shell_quote(@cmd);
+	my $persona = `$cmd`;
+	$persona = decode('utf-8', $persona);
+	$persona = unidecode($persona);
+	my $clr_persona_header = a24bg(0,20,40) . a24fg(255,200,250);
+	my $clr_persona_body = a24bg(0,20,40) . a24fg(255,240,200);
+	print "\n\n${clr_persona_header} === Persona === $rst\n$clr_persona_body$persona$rst";
+	$persona =~ s/\s*$//;
+	write_text($tmppersona, "$persona\n\n==== z Original prompt\n$desc\n\n");
+	if (-t *STDIN) {
+		gen_names_from_desc(userdesc=>$desc, persona=>$persona, opts=>$opts);
+	}
+}
+
+sub suggest_names_prior_persona {
+	}
+
+
+sub gen_names_from_desc {
+	my %fopts = @_;
+	my $userdesc = $fopts{userdesc} // die "gen_names_from_desc() missing userdesc=>\n";
+	my $persona = $fopts{persona} // die "gen_names_from_desc() missing persona=>\n";
+	my $opts = $fopts{opts} // die "gen_names_from_desc() missing opts=> (parsed Lucid options)";
+	my @names;
+	my $max_llmtries=3;
+	my $llmtries=$max_llmtries;
+
+	my @our_cur_files = find_persona_file_matches(
+				args=>[], opts=>[],
+				all=>1,
+				long=>0,
+				print=>0);
+	my $max_filename_samples = min($def_max_cur_files_samples-1, $#our_cur_files);
+	my $cur_files_str = (@our_cur_files == 0)
+		? " N/A\n"
+		: join('', map { " $_\n" } @our_cur_files[0..$max_filename_samples]);
+	my $sysprompt_names = sprintf($sysprompt_names_fmt, $cur_files_str);
+	$DB::single=1;
+
+	for (; $llmtries>0; $llmtries--) {
+		my $persona_prompt = "User's basic request:\n$userdesc\n\nPersona:\n$persona\n";
+		my @cmd = ($llmbin, '-H', '--system', $sysprompt_names, $persona_prompt);
+		my $cmd = shell_quote(@cmd);
+		print "Command, naming:\n$cya$cmd$rst\n" if $verbose > 1;
+		my $names = `$cmd`;
+		$names = unidecode($names);
+		# print "\n${bbla}Name options as a string:$rst\n$whi$names$rst";
+		@names = names_jsonstr_to_list($names);
+		last if @names;
+		say "\n${bgred}${whi} Error getting array from json string from LLM. String: $rst";
+		say "$cya$names$rst";
+	}
+	if (!$llmtries) {
+		die "We were unable to successfully produce a json names list.\nTried $whi$max_llmtries$rst times.\n";
+	}
+	my @unames;
+	if (! -t *STDIN) {
+		se "Input not a terminal. Using first name ($names[0])";
+		@unames = ($names[0]);
+		say "We are saving with the name, $names[0].";
+	} else {
+		@unames = user_names_choice(names=>\@names, desc=>$persona, auto=>0);
+	}
+	save_persona(desc=>$persona, userdesc=>$userdesc, names=>\@unames);
+}
+
+sub save_persona {
+	my %fopts = @_;
+	my @names = @{$fopts{names} // die "save_persona() missing names=>"};
+	my $desc = $fopts{desc} // die "save_persona() missing desc=>";
+	my $userdesc = $fopts{userdesc} // die "save_persona() missing userdesc=>\n";
+	die "No names. Exiting.\n" if !@names;
+	make_path($dir_storage);
+	chdir $dir_storage || die "Error making dir $dir_storage: $!";
+
+	my $first = shift @names;
+	write_text($first, "$desc\n\n==== z Original prompt\n$userdesc\n\n");
+	say '';
+	say "${bcya}Personality wriiten to: $yel$first$rst";
+	for my $newf (@names) {
+		symlink $first, $newf || die "Couldn't symlink: $newf -> $first: $!";
+		say " Linked  $bcya$newf$rst -> $cya$first$rst";
+	}
+	# say "Dir:\n$dir_storage";
+}
+
+sub names_jsonstr_to_list {
+    my ($jsonstr) = @_;
+    my $namesarr = eval {
+    	JSON::XS->new->relaxed(1)->allow_nonref->utf8->decode($jsonstr)
+    };
+    return () if !defined $namesarr;
+    return @$namesarr;
+}
+
+sub int_to_char($i) {
+	return $i if $i >= 0 && $i < 10;
+	return chr($i-10 + 97);
+}
+sub char_to_int($ch) {
+	return $ch if $ch =~ /^\d+$/;
+	return ord($ch)-97+10;
+}
+
+sub name_highlight($name, $trackh) {
+	my @w = split(/(?<=-{1,4})/, $name);
+	my @strs;
+	for my $w (@w) {
+		if ($w =~ /[a-z0-9]/i) { # Actual words
+			if (!($$trackh{$w} // 0)) { # Not found
+				push @strs, "$bmag$w$rst";
+				$$trackh{$w} = 1;
+			} else {
+				push @strs, "$yel$w$rst";
+			}
+		} else {
+			push @strs, "$w";
+		}
+	}
+	join '', @strs;
+}
+
+sub user_names_choice {
+	# 'auto'=>1: Automatically pick a name
+	my %fopts=@_;
+	my @names = @{$fopts{names} // die "user_names_choice() missing names=>"};
+	my $desc = $fopts{desc} // die "user_names_choice() missing desc=>";
+    my $quit=0;
+    $|=1;
+	ReadMode 3;
+	my @selections;
+	my @primariesi;
+	my %tracknames;
+    while (!$quit) {
+    	%tracknames=();
+    	for my $ni (0 .. @names-1) {
+    		my $name = $names[$ni];
+    		my $ch = int_to_char($ni);
+    		my $selected_flag;
+			if (($selections[$ni]//'') eq 'primary') {
+    			$selected_flag = "$yel*$rst ";
+			} elsif (($selections[$ni]//'') eq 'secondary') {
+    			$selected_flag = "$mag->$rst";
+			} else {
+    			$selected_flag = '  ';
+			}
+			printf " %2s $bmag%2s$rst. %s\n",
+				$selected_flag,
+				$ch,
+				name_highlight($name, \%tracknames);
+		}
+		print "Select one or more, ENTER to finish: ";
+		my $key;
+		while (not defined ($key = ReadKey(-1))) { }
+		if ($key eq "\n") { say "${bggre}${whi} DONE $rst"; last; }
+		if ($key eq "q") { say "${bgred}${yel} QUIT $rst"; @selections=(); last; }
+		if ($key !~ /^[0-9a-z]$/i) {
+			if ($key eq "\022") { say "${yel} REDUCE $rst"; last; }
+			say "${bred}Unknown key. ${rst}Code $yel" . ord($key) . "$rst";
+			next;
+		}
+		# say $key;
+		my $useri = char_to_int($key);
+		if ($useri >= @names || $useri < 0) { say "${bred}NOT IN LIST$rst"; next; }
+		my $primaryi = first_index { ($_//'') eq 'primary' } @selections;
+		if ($primaryi == -1) {
+			@primariesi = grep { $_ != $useri } @primariesi;
+			$selections[$useri] = 'primary';
+			push(@primariesi, $useri);
+		} else {
+			if (($selections[$useri] // '') eq 'secondary') {
+				# if already selected
+				$selections[$primaryi] = 'secondary' if $primaryi > -1;
+				$selections[$useri] = 'primary';
+			} elsif (($selections[$useri] // '') eq 'primary') {
+				$selections[$useri] = '';
+				@primariesi = grep { $_ != $useri } @primariesi;
+				if (@primariesi) {
+					# Set former primary back as primary
+					$selections[$primariesi[-1]] = 'primary';
+				} else {
+					my $firstseci =
+						first_index { ($_//'') eq 'secondary' } @selections;
+					if ($firstseci > -1) {
+						$selections[$firstseci] = 'primary';
+					}
+				}
+			} else {
+				$selections[$useri] = 'secondary';
+			}
+		}
+		sleep .2;
+		print "\n$desc\n";
+	}
+	ReadMode 0;
+	if (!@selections) {
+		return ();
+	}
+	my @finalprimaryi = first_index { ($_//'') eq 'primary' } @selections;
+	my @finalsecsi = indexes { ($_//'') eq 'secondary' } @selections;
+	my @unames = @names[@finalprimaryi, @finalsecsi];
+	# die join(' ', @unames) . "\n";
+	return @unames;
+}
+
+sub main {
+	my @specs = (
+		# Switch("version|V"),
+		Switch("--help|-h")->doc("This help"),
+		Switch("--longhelp|--lh")->doc("Longer help"),
+		Counter("--verbose|-v")->default(0),
+		Switch("--nowipe|-W")->doc("DISABLE wiping LLM history before starting."),
+		Switch("--paths|--path|-p")->doc("Used for find, outputs full paths."),
+		Switch("--sum|--summarize")->doc("Used for show, summarize the descriptions."),
+		Switch("--long|-l")->doc("Longer output. Used for summarize."),
+		Switch("--json|-j")->doc("Used for show (desc), forces json if not multi"),
+		Switch("--plain")->doc("Used for show (desc), forces plain text output even if multi"),
+		Switch("--first|-1")->doc("Used for show (desc), will output just the first match"),
+		Switch("--byname|-B")->doc("Used for ls, sort by name (default is by date, most recent first (eg. for head -1 use))"),
+		Switch("--simplify-utf8|-u")->doc("Replace common UTF8 (like left-right quotes) with ascii"),
+		# Switch("--no-utf8|-U")->doc("Force no UTF8, replacing what it can and stripping"),
+		Switch("--multi|-m")->doc("Allow multiples output. (Usually options, like show, summarize, etc. are used to retrieve a single persona, and the caller would want them to ERROR if the match was not specific enough. This option enables multiple-output mode, which is likely useful to then see a bunch of items and their descriptions or summaries."),
+		# Param("input|i")->default("/etc/profile")->doc("Input file"),
+		#Param("input")->needs("output"),
+	);
+	my $opts = Getopt::Lucid->new( \@specs, { strict=>1 } );
+	$opts->getopt();
+	$verbose = $opts->get_verbose;
+	if (!@ARGV || $opts->get_help || $opts->get_longhelp) {
+		my $cmd_name_clr = $bmag;
+		my $cmd_ex_clr = a24fg(235,130,255);
+		my $cmd_upart_clr = a24fg(155,230,255);
+		my $cmd_hl_clr = a24fg(255,255,255);
+		my $cmd_hl_aliases = a24fg(150,150,150);
+		my $helpstr = <<~"EOT";
+
+			Manage persona files for LLMs
+			Commands (each has multiple words to trigger it)
+			The most-recent generated persona is stored in /tmp,
+			and, if called from a terminal, a list of storage names is proposed
+			for the user to multi-select from for ease of querying later.
+			Persona files ending in ~ are ignored.
+			
+			${cmd_name_clr}GEN$rst a persona: ${cmd_hl_aliases}(a add c create m make g gen generate)$rst
+			    \$ ${cmd_ex_clr}persona add$rst ${cmd_upart_clr}a helpful ai assistant$rst
+			       a add c create m make g gen generate
+			${cmd_name_clr}L$rst ${cmd_upart_clr}(list all ${cmd_hl_clr}filenames${cmd_upart_clr})$rst:
+			    \$ ${cmd_ex_clr}persona l [--byname]$rst
+			${cmd_name_clr}LS$rst ${cmd_upart_clr}(list all ${cmd_hl_clr}filenames with date size${cmd_upart_clr})$rst:
+			    \$ ${cmd_ex_clr}persona ls [--byname]$rst  (ls or list)
+			${cmd_name_clr}FIND$rst a persona$rst: ${cmd_hl_aliases}(f find)$rst
+			    \$ ${cmd_ex_clr}persona f$rst ${cmd_upart_clr}help ass$rst
+			       *** boolean OR of separate terms by default
+			${cmd_name_clr}SHOW$rst a persona$rst: ${cmd_hl_aliases}(dump get show)$rst
+			    \$ ${cmd_ex_clr}persona show$rst ${cmd_upart_clr}doctor$rst [--first|-1] [--multi]
+			    Options: --sum
+			${cmd_name_clr}SUMMARIZE$rst a persona$rst: ${cmd_hl_aliases}(sum summary summarize)$rst
+			    \$ ${cmd_ex_clr}persona sum$rst ${cmd_upart_clr}doctor$rst
+			    Options: --long
+			${cmd_name_clr}STORE$rst prior generation if not stored at time of generation$rst: ${cmd_hl_aliases}(s store)$rst
+			    ** NOT IMPLEMENTED ***
+			    \$ ${cmd_ex_clr}persona store$rst
+			EOT
+		if (!$opts->get_longhelp) {
+			$helpstr .= "\n";
+			$helpstr .= <<~"EOT";
+				--lh          Long version of this
+				-B, --byname  [ls] name sort desc.
+				-1, --first   Only first match
+				-j, --json    [show], not with multi
+				-l, --long    [sum] longer output
+				-m, --multi   [sum,show,etc.] Allow mult outputs
+				-W, --nowipe  DISABLE wiping history
+				-p, --[path|paths]  [find] outut full paths
+				--plain             [show] force plain text out
+				-u, --simplify-utf8 Simplify to ascii
+				--[sum|summarize]   [show] summarize desc
+				-v, --verbose
+				EOT
+		} else { $helpstr .= $opts->usage; }
+		$helpstr .= "\nStorage: $cya$dir_storage_raw$rst\n\n" if $verbose;
+		print $helpstr;
+		exit;
+	}
+	$verbose = $opts->get_verbose;
+	my $cmd = shift @ARGV;
+	if ($cmd =~ /^(a|add|c|create|m|make|g|gen|generate)$/) {
+		gen_persona(args=>\@ARGV, opts=>$opts);
+	} elsif ($cmd =~ /^(l)$/) {
+		find_persona(args=>\@ARGV, opts=>$opts,
+			all=>1,
+			short=>1,
+		);
+	} elsif ($cmd =~ /^(ls|list)$/) {
+		find_persona(args=>\@ARGV, opts=>$opts,
+			all=>1,
+			long=>1,
+		);
+	} elsif ($cmd =~ /^(f|find)$/) {
+		find_persona(args=>\@ARGV, opts=>$opts);
+	} elsif ($cmd =~ /^(v|voice)$/) {
+		show_persona(args=>\@ARGV, opts=>$opts,
+			plain=>$opts->get_plain,
+			json=>$opts->get_json,
+			multi=>$opts->get_multi,
+			first=>$opts->get_first,
+			voice=>1,
+		) || exit 1;
+	} elsif ($cmd =~ /^(get|show|dump)$/) {
+		show_persona(args=>\@ARGV, opts=>$opts,
+			summarize=>$opts->get_sum,
+			plain=>$opts->get_plain,
+			json=>$opts->get_json,
+			multi=>$opts->get_multi,
+			first=>$opts->get_first,
+		) || exit 1;
+	} elsif ($cmd =~ /^(sum|summary|summarize)$/) {
+		show_persona(args=>\@ARGV, opts=>$opts,
+			summarize=>1,
+			plain=>$opts->get_plain,
+			json=>$opts->get_json,
+			multi=>$opts->get_multi,
+			first=>$opts->get_first,
+			long=>$opts->get_long,
+		) || exit 1;
+	} elsif ($cmd =~ /^(s|store)$/) {
+		store_persona();
+	} elsif ($cmd =~ /^(n|name)$/) {
+		die "n/name not implemented\n";
+	} else {
+		die "What's '$cmd'? Aborting.\n";
+	}
+}
+
+main()
+
+
+####
+Before we develop anything, let's work out this plan. And in our plan/spec we should include comments to an LLM telling it how to behave when working on this project; how to think; how to be comprehensive; how to evaluate the future; how to be empathetic; how to expand considerations to users' different needs...
+
+#### Let's evaluate all the angles here

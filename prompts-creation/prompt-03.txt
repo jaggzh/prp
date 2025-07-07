@@ -1,0 +1,2 @@
+and don't forget short or long names, and when run alone it should give pretty help
+Let's go ahead and start it I guess.  wish us luck.

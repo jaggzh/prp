@@ -1,0 +1,42 @@
+I buried calling it 'prp' in my messages I think.  although drp could be "development requirements packager", prp would be package or project requirements packager.
+for maintainability, we shouldn't do too much with figuring out the packages for them. They fiddle with the versions and stuff and then say "okay this libjpeg9 is the one.   and this other one, mark libjpeg5 local auto for now... or pending.. i manually installed it and want it "
+
+Hmm.. contemplating the workflow.
+$ prp n mediapipe
+Set 'mediapipe' as current project name for equivs/dependencies.
+System detected as Debian.
+Package named appropriately as 'mediapipe-deps'
+Created:
+  ./.prp/state.yaml 
+$ sudo apt install libjpeg5
+Hmm .. looks good.
+$ prp a libjpeg5
+libjpeg5 added as a dependency... ?
+Shoot, that wasn't it.
+$ sudo apt install libjpeg9
+$ prp r libjpeg5
+libjpeg5 removed from our local deps
+libjpeg5 added to our local 'to-be-removed' section, to be marked as 'auto' in the system package manager.
+$ prp e libjpeg9 # eval
+Okay, you're evaluating libjpeg9 right now, and are likely installing it by hand, but aren't sure you want it in the future and want a reminder to clean it up later if you forget.
+Adding libjpeg9 to local Tentatives / Evaluations
+$ prp a libjpeg9
+OKay, libjpeg9 was in tentatives.
+libjpeg9 added to deps
+
+I don't want the project to be so overwhelming that we don't make it right now.
+And I can't evaluate it on other platforms. just debian.
+In fact, I just want to use it, not evaluate it.
+
+I think we want it kiss. We don't want it a crazy advanced.
+In fact, we want it a sort of beautiful minimalistic thing.
+Its design should be designed in a way that's thought-out beautifully, so it's like fundamental laws.
+PERHAPS we can have it simple, with hooks users can add in, which add capabilities/features, and get plopped into its tree of plugins?
+
+But I don't know how to do that.
+like hooks/add/ hooks/eval/
+platform/switch.py  # this evaluates the platform and loads the appropriate stuff so other things, like appropriate hooks will be used.
+so:
+platform/switch.py # We have this, and only for debian right now
+hooks/ # our default add and new and eval stuff come from here
+plugins/ # other generalized plugins? (future use. these might override/modify other functionality)

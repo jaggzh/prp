@@ -87,6 +87,7 @@ class PRPState:
             'dependencies': [],
             'tentative': [],
             'cleanup': [],
+            'original_state': {},  # Track pre-project package states
             'meta_package': {
                 'version': '1.0',
                 'maintainer': 'Auto Generated <noreply@localhost>',
@@ -223,6 +224,82 @@ class PRP:
         print(f"{c.BLUE}Package named appropriately as '{package_name}'{c.RESET}")
         print(f"{c.GREEN}Created: ./.prp/state.yaml{c.RESET}")
     
+    def cmd_track(self, package_names: List[str], update: bool = False):
+        """Track packages and record their current state before experimenting"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
+            return
+        
+        if 'original_state' not in state:
+            state['original_state'] = {}
+        
+        state_changed = False
+        
+        for package_name in package_names:
+            print(f"{c.BLUE}Recording current state of {package_name}...{c.RESET}")
+            
+            # Check current state
+            is_installed, is_manual = self.platform.package_status(package_name)
+            
+            # Record or update original state
+            if package_name not in state['original_state'] or update:
+                state['original_state'][package_name] = {
+                    'was_installed': is_installed,
+                    'was_manual': is_manual
+                }
+                
+                if is_installed:
+                    status_desc = "manually installed" if is_manual else "auto-installed"
+                    action = "updated" if update else "recorded"
+                    print(f"{c.YELLOW}   {package_name} is currently {status_desc} - {action}{c.RESET}")
+                else:
+                    action = "updated" if update else "recorded"
+                    print(f"{c.YELLOW}   {package_name} is not installed - {action}{c.RESET}")
+                state_changed = True
+            else:
+                orig = state['original_state'][package_name]
+                if orig['was_installed']:
+                    status_desc = "manually installed" if orig['was_manual'] else "auto-installed"
+                    print(f"{c.DIM}   {package_name} original state: was {status_desc} (use --update to refresh){c.RESET}")
+                else:
+                    print(f"{c.DIM}   {package_name} original state: was not installed (use --update to refresh){c.RESET}")
+            
+            # Add to tentative list if not already in dependencies
+            if package_name not in state['dependencies']:
+                if package_name not in state['tentative']:
+                    state['tentative'].append(package_name)
+                    print(f"{c.CYAN}   Added to tentative list{c.RESET}")
+                    state_changed = True
+                else:
+                    print(f"{c.DIM}   Already in tentative list{c.RESET}")
+            else:
+                print(f"{c.GREEN}   Already in dependencies{c.RESET}")
+        
+        if state_changed:
+            self.state_manager.save(state)
+            
+        print(f"\n{c.GREEN}State tracking complete{c.RESET}")
+        print(f"{c.DIM}Install packages manually, then use 'prp a' to add safely{c.RESET}")
+    
+    def cmd_add_tentative(self):
+        """Add all tentative packages to dependencies"""
+        state = self.state_manager.load()
+        
+        if not state['project']['name']:
+            print(f"{c.RED}Error: No project initialized{c.RESET}")
+            return
+            
+        tentative = state['tentative'].copy()
+        if not tentative:
+            print(f"{c.YELLOW}No tentative packages to add{c.RESET}")
+            return
+            
+        print(f"{c.BLUE}Adding all {len(tentative)} tentative packages...{c.RESET}")
+        self.cmd_add(tentative, force=False, manual=False, no_auto=False)
+    
     def cmd_add(self, package_names: List[str], force: bool = False, manual: bool = False, no_auto: bool = False):
         """Add packages to dependencies"""
         state = self.state_manager.load()
@@ -232,11 +309,23 @@ class PRP:
             print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
             return
         
+        if 'original_state' not in state:
+            state['original_state'] = {}
+        
         packages_to_mark_auto = []
         state_changed = False
         
         for package_name in package_names:
-            print(f"\n{c.BLUE}Testing {package_name} status...{c.RESET}")
+            print(f"\n{c.BLUE}Processing {package_name}...{c.RESET}")
+            
+            # Record original state if not already recorded
+            if package_name not in state['original_state']:
+                is_installed, is_manual = self.platform.package_status(package_name)
+                state['original_state'][package_name] = {
+                    'was_installed': is_installed,
+                    'was_manual': is_manual
+                }
+                print(f"{c.DIM}   Recording original state: {is_installed=}, {is_manual=}{c.RESET}")
             
             # Check if package exists
             pkg_exists = self.platform.package_exists(package_name)
@@ -247,18 +336,23 @@ class PRP:
             elif not pkg_exists and force:
                 print(f"{c.YELLOW}   {package_name} not found but forcing addition{c.RESET}")
             
-            # Check installation status
+            # Check current installation status
             if pkg_exists:
                 is_installed, is_manual = self.platform.package_status(package_name)
+                original = state['original_state'][package_name]
+                
                 if is_installed:
                     if is_manual and not no_auto and not manual:
-                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed{c.RESET}")
-                        packages_to_mark_auto.append(package_name)
-                        print(f"{c.BLUE}   Will mark as auto-installed{c.RESET}")
-                    elif is_manual and manual:
-                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed (keeping as manual){c.RESET}")
+                        # Only mark as auto if it wasn't originally manually installed
+                        if not original['was_manual']:
+                            packages_to_mark_auto.append(package_name)
+                            print(f"{c.YELLOW}   {package_name} is manually installed (will mark as auto){c.RESET}")
+                        else:
+                            print(f"{c.YELLOW}   {package_name} is manually installed (was manual before project - keeping manual){c.RESET}")
+                    elif is_manual and (manual or original['was_manual']):
+                        print(f"{c.YELLOW}   {package_name} is manually installed (keeping as manual){c.RESET}")
                     elif is_manual and no_auto:
-                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed (not changing){c.RESET}")
+                        print(f"{c.YELLOW}   {package_name} is manually installed (not changing){c.RESET}")
                     else:
                         print(f"{c.GREEN}   {package_name} is auto-installed{c.RESET}")
                 else:
@@ -340,15 +434,35 @@ class PRP:
         deps = state['dependencies']
         if deps:
             print(f"\n{c.BOLD}{c.GREEN}Dependencies ({len(deps)}):{c.RESET}")
+            original_state = state.get('original_state', {})
             for dep in deps:
-                print(f"  {c.GREEN}✓{c.RESET} {dep}")
+                orig_marker = ""
+                if dep in original_state:
+                    orig = original_state[dep]
+                    if orig['was_manual']:
+                        orig_marker = f" {c.DIM}(was manual){c.RESET}"
+                    elif orig['was_installed']:
+                        orig_marker = f" {c.DIM}(was auto){c.RESET}"
+                    else:
+                        orig_marker = f" {c.DIM}(was not installed){c.RESET}"
+                print(f"  {c.GREEN}✓{c.RESET} {dep}{orig_marker}")
         
         # Tentative
         tentative = state['tentative']
         if tentative:
             print(f"\n{c.BOLD}{c.YELLOW}Tentative ({len(tentative)}):{c.RESET}")
+            original_state = state.get('original_state', {})
             for pkg in tentative:
-                print(f"  {c.YELLOW}?{c.RESET} {pkg}")
+                orig_marker = ""
+                if pkg in original_state:
+                    orig = original_state[pkg]
+                    if orig['was_manual']:
+                        orig_marker = f" {c.DIM}(was manual){c.RESET}"
+                    elif orig['was_installed']:
+                        orig_marker = f" {c.DIM}(was auto){c.RESET}"
+                    else:
+                        orig_marker = f" {c.DIM}(was not installed){c.RESET}"
+                print(f"  {c.YELLOW}?{c.RESET} {pkg}{orig_marker}")
         
         # Cleanup
         cleanup = state['cleanup']
@@ -364,7 +478,8 @@ class PRP:
         
         if not deps and not tentative:
             print(f"\n{c.DIM}No dependencies tracked yet.{c.RESET}")
-            print(f"{c.DIM}Use 'prp a PACKAGE' to add dependencies{c.RESET}")
+            print(f"{c.DIM}Use 'prp t PACKAGE' to track then 'prp a' to add safely{c.RESET}")
+            print(f"{c.DIM}Or 'prp a PACKAGE' to add directly{c.RESET}")
         
         print()
     
@@ -453,7 +568,10 @@ def show_help():
 
 {c.BOLD}Commands:{c.RESET}
   {c.BGREEN}n, new{c.RESET} PROJECT_NAME     Create new project
-  {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]  Add package(s) to dependencies  
+  {c.BGREEN}t, track{c.RESET} PACKAGE [PKG2...]  Track packages & record current state
+    {c.DIM}--update            Update recorded state to current state{c.RESET}
+  {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]    Add package(s) to dependencies  
+  {c.BGREEN}a, add{c.RESET}                     Add all tentative packages
     {c.DIM}-f, --force          Force add even if package not found{c.RESET}
     {c.DIM}-m, --manual         Keep package marked as manually installed{c.RESET}
     {c.DIM}-A, --no-auto        Don't change package's manual/auto status{c.RESET}
@@ -463,11 +581,18 @@ def show_help():
   {c.BGREEN}install{c.RESET}                 Build & install meta-package
   {c.BGREEN}uninstall{c.RESET}               Remove meta-package & cleanup
 
-{c.BOLD}Example workflow:{c.RESET}
+{c.BOLD}Safe workflow (preserves pre-project package states):{c.RESET}
   {c.CYAN}$ prp n mediapipe{c.RESET}                           {c.DIM}# Start new project{c.RESET}
-  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}   {c.DIM}# Install manually to test{c.RESET}
-  {c.CYAN}$ prp a libjpeg-dev libpng-dev libtiff-dev{c.RESET}  {c.DIM}# Add multiple packages{c.RESET}
+  {c.CYAN}$ prp t libjpeg-dev libpng-dev{c.RESET}              {c.DIM}# Record current state{c.RESET}
+  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}   {c.DIM}# Install manually{c.RESET}
+  {c.CYAN}$ prp a{c.RESET}                                     {c.DIM}# Add all tentative (respects original state){c.RESET}
   {c.CYAN}$ prp install{c.RESET}                               {c.DIM}# Create & install meta-package{c.RESET}
+
+{c.BOLD}Update tracking after system changes:{c.RESET}
+  {c.CYAN}$ prp t libjpeg-dev --update{c.RESET}                {c.DIM}# Update recorded state to current{c.RESET}
+
+{c.BOLD}Quick workflow:{c.RESET}
+  {c.CYAN}$ prp a libjpeg-dev libpng-dev libtiff-dev{c.RESET}  {c.DIM}# Add multiple packages{c.RESET}
 
 {c.DIM}State stored in ./.prp/state.yaml{c.RESET}
 """
@@ -492,11 +617,11 @@ def main():
         prp.cmd_new(args[0])
     
     elif command in ['a', 'add']:
-        if len(args) < 1:
-            print(f"{c.RED}Error: Package name(s) required{c.RESET}")
-            print(f"{c.DIM}Usage: prp a PACKAGE [PACKAGE2 ...] [-f] [-m] [-A]{c.RESET}")
+        # Handle 'prp a' with no arguments - add all tentative
+        if len(args) == 0:
+            prp.cmd_add_tentative()
             return
-        
+            
         # Parse flags for add command
         packages = []
         flags = []
@@ -515,6 +640,27 @@ def main():
         no_auto = '-A' in flags or '--no-auto' in flags
         
         prp.cmd_add(packages, force=force, manual=manual, no_auto=no_auto)
+    
+    elif command in ['t', 'track']:
+        if len(args) < 1:
+            print(f"{c.RED}Error: Package name(s) required{c.RESET}")
+            print(f"{c.DIM}Usage: prp t PACKAGE [PACKAGE2 ...] [--update]{c.RESET}")
+            return
+        
+        # Parse flags and packages
+        packages = []
+        update = False
+        for arg in args:
+            if arg == '--update':
+                update = True
+            elif not arg.startswith('-'):
+                packages.append(arg)
+        
+        if not packages:
+            print(f"{c.RED}Error: No package names provided{c.RESET}")
+            return
+            
+        prp.cmd_track(packages, update=update)
     
     elif command in ['r', 'remove']:
         if len(args) < 1:

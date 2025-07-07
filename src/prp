@@ -223,8 +223,8 @@ class PRP:
         print(f"{c.BLUE}Package named appropriately as '{package_name}'{c.RESET}")
         print(f"{c.GREEN}Created: ./.prp/state.yaml{c.RESET}")
     
-    def cmd_add(self, package_name: str, force: bool = False, manual: bool = False, no_auto: bool = False):
-        """Add package to dependencies"""
+    def cmd_add(self, package_names: List[str], force: bool = False, manual: bool = False, no_auto: bool = False):
+        """Add packages to dependencies"""
         state = self.state_manager.load()
         
         if not state['project']['name']:
@@ -232,47 +232,60 @@ class PRP:
             print(f"{c.DIM}Hint: Run 'prp n PROJECT_NAME' first{c.RESET}")
             return
         
-        print(f"{c.BLUE}Testing {package_name} status...{c.RESET}")
+        packages_to_mark_auto = []
+        state_changed = False
         
-        # Check if package exists
-        pkg_exists = self.platform.package_exists(package_name)
-        if not pkg_exists and not force:
-            print(f"{c.RED}   {package_name} was not found as a [Debian] package{c.RESET}")
-            print(f"{c.DIM}Use -f / --force to force add it as a dependency{c.RESET}")
-            return
-        elif not pkg_exists and force:
-            print(f"{c.YELLOW}   {package_name} not found but forcing addition{c.RESET}")
-        
-        # Check installation status
-        if pkg_exists:
-            is_installed, is_manual = self.platform.package_status(package_name)
-            if is_installed:
-                if is_manual and not no_auto and not manual:
-                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed{c.RESET}")
-                    self.platform.mark_auto([package_name])
-                    print(f"{c.BLUE}   Marked as auto-installed{c.RESET}")
-                    print(f"{c.DIM}   (use -m to keep as manually installed, or -A to skip auto-marking){c.RESET}")
-                elif is_manual and manual:
-                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed (keeping as manual){c.RESET}")
-                elif is_manual and no_auto:
-                    print(f"{c.YELLOW}   {package_name} is MANUALLY installed (not changing){c.RESET}")
+        for package_name in package_names:
+            print(f"\n{c.BLUE}Testing {package_name} status...{c.RESET}")
+            
+            # Check if package exists
+            pkg_exists = self.platform.package_exists(package_name)
+            if not pkg_exists and not force:
+                print(f"{c.RED}   {package_name} was not found as a [Debian] package{c.RESET}")
+                print(f"{c.DIM}   Use -f / --force to force add it as a dependency{c.RESET}")
+                continue
+            elif not pkg_exists and force:
+                print(f"{c.YELLOW}   {package_name} not found but forcing addition{c.RESET}")
+            
+            # Check installation status
+            if pkg_exists:
+                is_installed, is_manual = self.platform.package_status(package_name)
+                if is_installed:
+                    if is_manual and not no_auto and not manual:
+                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed{c.RESET}")
+                        packages_to_mark_auto.append(package_name)
+                        print(f"{c.BLUE}   Will mark as auto-installed{c.RESET}")
+                    elif is_manual and manual:
+                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed (keeping as manual){c.RESET}")
+                    elif is_manual and no_auto:
+                        print(f"{c.YELLOW}   {package_name} is MANUALLY installed (not changing){c.RESET}")
+                    else:
+                        print(f"{c.GREEN}   {package_name} is auto-installed{c.RESET}")
                 else:
-                    print(f"{c.GREEN}   {package_name} is auto-installed{c.RESET}")
+                    print(f"{c.YELLOW}   {package_name} is not installed{c.RESET}")
+            
+            # Move from tentative if it was there
+            if package_name in state['tentative']:
+                state['tentative'].remove(package_name)
+                print(f"{c.BGREEN}   {package_name} moved from tentative to dependencies{c.RESET}")
+                state_changed = True
+            
+            if package_name not in state['dependencies']:
+                state['dependencies'].append(package_name)
+                print(f"{c.BGREEN}   {package_name} added to dependencies{c.RESET}")
+                state_changed = True
             else:
-                print(f"{c.YELLOW}   {package_name} is not installed{c.RESET}")
+                print(f"{c.YELLOW}   {package_name} already in dependencies{c.RESET}")
         
-        # Move from tentative if it was there
-        if package_name in state['tentative']:
-            state['tentative'].remove(package_name)
-            print(f"{c.BGREEN}{package_name} moved from tentative to dependencies{c.RESET}")
+        # Mark packages as auto in batch
+        if packages_to_mark_auto:
+            print(f"\n{c.BLUE}Marking {len(packages_to_mark_auto)} packages as auto-installed...{c.RESET}")
+            self.platform.mark_auto(packages_to_mark_auto)
+            print(f"{c.GREEN}Done.{c.RESET}")
         
-        if package_name not in state['dependencies']:
-            state['dependencies'].append(package_name)
-            print(f"{c.BGREEN}{package_name} added to dependencies{c.RESET}")
-        else:
-            print(f"{c.YELLOW}{package_name} already in dependencies{c.RESET}")
-        
-        self.state_manager.save(state)
+        if state_changed:
+            self.state_manager.save(state)
+            print(f"\n{c.GREEN}Added {len([p for p in package_names if p in state['dependencies']])} packages to dependencies{c.RESET}")
     
     def cmd_remove_package(self, package_name: str):
         """Remove package from dependencies and mark for cleanup"""
@@ -439,24 +452,22 @@ def show_help():
 {c.DIM}A beautiful, minimal tool for tracking project dependencies{c.RESET}
 
 {c.BOLD}Commands:{c.RESET}
-  {c.BGREEN}n, new{c.RESET} PROJECT_NAME    Create new project
-  {c.BGREEN}a, add{c.RESET} PACKAGE         Add package to dependencies  
+  {c.BGREEN}n, new{c.RESET} PROJECT_NAME     Create new project
+  {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]  Add package(s) to dependencies  
     {c.DIM}-f, --force          Force add even if package not found{c.RESET}
     {c.DIM}-m, --manual         Keep package marked as manually installed{c.RESET}
     {c.DIM}-A, --no-auto        Don't change package's manual/auto status{c.RESET}
-  {c.BGREEN}r, remove{c.RESET} PACKAGE      Remove from dependencies & mark for cleanup
-  {c.BGREEN}e, eval{c.RESET} PACKAGE        Add to tentative list (evaluating)
-  {c.BGREEN}s, status{c.RESET}              Show current project status
-  {c.BGREEN}install{c.RESET}                Build & install meta-package
-  {c.BGREEN}uninstall{c.RESET}              Remove meta-package & cleanup
+  {c.BGREEN}r, remove{c.RESET} PACKAGE       Remove from dependencies & mark for cleanup
+  {c.BGREEN}e, eval{c.RESET} PACKAGE         Add to tentative list (evaluating)
+  {c.BGREEN}s, status{c.RESET}               Show current project status
+  {c.BGREEN}install{c.RESET}                 Build & install meta-package
+  {c.BGREEN}uninstall{c.RESET}               Remove meta-package & cleanup
 
 {c.BOLD}Example workflow:{c.RESET}
-  {c.CYAN}$ prp n mediapipe{c.RESET}                   {c.DIM}# Start new project{c.RESET}
-  {c.CYAN}$ sudo apt install libjpeg-dev{c.RESET}      {c.DIM}# Install manually to test{c.RESET}
-  {c.CYAN}$ prp a libjpeg-dev{c.RESET}                 {c.DIM}# Add & auto-mark package{c.RESET}
-  {c.CYAN}$ prp e libpng-dev{c.RESET}                  {c.DIM}# Mark as evaluating{c.RESET}
-  {c.CYAN}$ prp a libpng-dev{c.RESET}                  {c.DIM}# Confirm as dependency{c.RESET}
-  {c.CYAN}$ prp install{c.RESET}                       {c.DIM}# Create & install meta-package{c.RESET}
+  {c.CYAN}$ prp n mediapipe{c.RESET}                           {c.DIM}# Start new project{c.RESET}
+  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}   {c.DIM}# Install manually to test{c.RESET}
+  {c.CYAN}$ prp a libjpeg-dev libpng-dev libtiff-dev{c.RESET}  {c.DIM}# Add multiple packages{c.RESET}
+  {c.CYAN}$ prp install{c.RESET}                               {c.DIM}# Create & install meta-package{c.RESET}
 
 {c.DIM}State stored in ./.prp/state.yaml{c.RESET}
 """
@@ -482,17 +493,28 @@ def main():
     
     elif command in ['a', 'add']:
         if len(args) < 1:
-            print(f"{c.RED}Error: Package name required{c.RESET}")
-            print(f"{c.DIM}Usage: prp a PACKAGE [-f] [-m] [-A]{c.RESET}")
+            print(f"{c.RED}Error: Package name(s) required{c.RESET}")
+            print(f"{c.DIM}Usage: prp a PACKAGE [PACKAGE2 ...] [-f] [-m] [-A]{c.RESET}")
             return
         
         # Parse flags for add command
-        package_name = args[0]
-        force = '-f' in args or '--force' in args
-        manual = '-m' in args or '--manual' in args
-        no_auto = '-A' in args or '--no-auto' in args
+        packages = []
+        flags = []
+        for arg in args:
+            if arg.startswith('-'):
+                flags.append(arg)
+            else:
+                packages.append(arg)
         
-        prp.cmd_add(package_name, force=force, manual=manual, no_auto=no_auto)
+        if not packages:
+            print(f"{c.RED}Error: No package names provided{c.RESET}")
+            return
+            
+        force = '-f' in flags or '--force' in flags
+        manual = '-m' in flags or '--manual' in flags
+        no_auto = '-A' in flags or '--no-auto' in flags
+        
+        prp.cmd_add(packages, force=force, manual=manual, no_auto=no_auto)
     
     elif command in ['r', 'remove']:
         if len(args) < 1:

@@ -4,6 +4,11 @@
 
 **PRP** is a beautiful, minimal tool that tracks your project's build dependencies and creates clean meta-packages for Debian/Ubuntu systems. It's the missing piece between "just `apt install` whatever" and "wait, what did I install for this project again?"
 
+<div align="center">
+  <em>Usage overview</em><br>
+  <img src="ss/help.png" alt="Usage overview"><br>
+</div>
+
 ## The Problem
 
 You know the drill:

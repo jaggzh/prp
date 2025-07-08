@@ -567,26 +567,26 @@ def show_help():
 {c.DIM}A beautiful, minimal tool for tracking project dependencies{c.RESET}
 
 {c.BOLD}Commands:{c.RESET}
-  {c.BGREEN}n, new{c.RESET} PROJECT_NAME     Create new project
-  {c.BGREEN}t, track{c.RESET} PACKAGE [PKG2...]  Track packages & record current state
-    {c.DIM}--update            Update recorded state to current state{c.RESET}
-  {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]    Add package(s) to dependencies  
+  {c.BGREEN}n, new{c.RESET} PROJECT_NAME        Create new project
+  {c.BGREEN}t, track{c.RESET} PACKAGE [PKG2...] Track packages & record current state
+    {c.DIM}--update                 Update recorded state to current state{c.RESET}
+  {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]   Add package(s) to dependencies  
   {c.BGREEN}a, add{c.RESET}                     Add all tentative packages
     {c.DIM}-f, --force          Force add even if package not found{c.RESET}
     {c.DIM}-m, --manual         Keep package marked as manually installed{c.RESET}
     {c.DIM}-A, --no-auto        Don't change package's manual/auto status{c.RESET}
-  {c.BGREEN}r, remove{c.RESET} PACKAGE       Remove from dependencies & mark for cleanup
-  {c.BGREEN}e, eval{c.RESET} PACKAGE         Add to tentative list (evaluating)
-  {c.BGREEN}s, status{c.RESET}               Show current project status
-  {c.BGREEN}install{c.RESET}                 Build & install meta-package
-  {c.BGREEN}uninstall{c.RESET}               Remove meta-package & cleanup
+  {c.BGREEN}r, remove{c.RESET} PACKAGE          Remove from dependencies & mark for cleanup
+  {c.BGREEN}e, eval{c.RESET} PACKAGE            Add to tentative list (evaluating)
+  {c.BGREEN}s, status{c.RESET}                  Show current project status
+  {c.BGREEN}install{c.RESET}                    Build & install meta-package
+  {c.BGREEN}uninstall{c.RESET}                  Remove meta-package & cleanup
 
 {c.BOLD}Safe workflow (preserves pre-project package states):{c.RESET}
-  {c.CYAN}$ prp n mediapipe{c.RESET}                           {c.DIM}# Start new project{c.RESET}
-  {c.CYAN}$ prp t libjpeg-dev libpng-dev{c.RESET}              {c.DIM}# Record current state{c.RESET}
-  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}   {c.DIM}# Install manually{c.RESET}
-  {c.CYAN}$ prp a{c.RESET}                                     {c.DIM}# Add all tentative (respects original state){c.RESET}
-  {c.CYAN}$ prp install{c.RESET}                               {c.DIM}# Create & install meta-package{c.RESET}
+  {c.CYAN}$ prp n mediapipe{c.RESET}                          {c.DIM}# Start new project{c.RESET}
+  {c.CYAN}$ prp t libjpeg-dev libpng-dev{c.RESET}             {c.DIM}# Record current state{c.RESET}
+  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}  {c.DIM}# Install manually{c.RESET}
+  {c.CYAN}$ prp a{c.RESET}                                    {c.DIM}# Add all tentative (respects original state){c.RESET}
+  {c.CYAN}$ prp install{c.RESET}                              {c.DIM}# Create & install meta-package{c.RESET}
 
 {c.BOLD}Update tracking after system changes:{c.RESET}
   {c.CYAN}$ prp t libjpeg-dev --update{c.RESET}                {c.DIM}# Update recorded state to current{c.RESET}

@@ -33,6 +33,11 @@ $ sudo apt autoremove
 
 ## Quick Start
 
+### Workflow 1: Permanent Meta-Package (Recommended)
+*Keep the meta-package installed for easy dependency management and reinstallation*
+
+This workflow is most-appropriate when you are definitely going through with the project. The -deps meta-package PRP creates for you, upon removal, frees up the packages from their "manually-installed" state.
+
 ```bash
 # Download and make executable
 curl -O https://raw.githubusercontent.com/yourusername/prp/main/prp
@@ -46,13 +51,41 @@ chmod +x prp
 # Add to project dependencies (respects pre-existing package states)
 ./prp a
 
-# Create meta-package and install
+# Create meta-package and install it
 ./prp install
+# Now you have my-cool-project-deps installed, which pulls in all your tracked dependencies
 
-# Later: clean removal
-./prp uninstall
+# Later: clean removal of everything
+./prp uninstall  # Removes meta-package and restores original package states
 sudo apt autoremove  # Now safe and predictable
 ```
+
+### Workflow 2: Temporary Project Cleanup
+*Use PRP for intelligent package marking, then remove all tracking*
+
+When you're just fiddling around, and might not even keep this project around. You don't have to go through with the full -deps creation. PRP can track your package installs and then handle the uninstall for you, and you're all clean. **CAVEAT**: Dependencies of packages you installed are NOT tracked by PRP and, unfortunately, when their 'parent' package (the one depending on them, and the one tracked and removed by PRP) -- when that one is removed, Debian will sometimes NOT autoremove them (with `apt autoremove`). You'll find this is the case when a package is installed as a dependency, remains in autoinstalled state, but some other random package had listed it as **Recommended**. Debian does NOT autoremove these!
+
+```bash
+# Same setup as above
+./prp n temp-experiment
+./prp t opencv-dev qt5-dev libboost-dev  # Auto-installs and tracks original states
+
+# Add to dependencies and create meta-package
+./prp a
+./prp install
+# This properly marks packages as auto-installed (unless they were manually installed before)
+
+# Remove the meta-package but keep the intelligent marking
+./prp uninstall
+# Packages that were NOT manually installed before your project are now marked auto
+# Packages that WERE manually installed before remain manual
+
+# Clean up auto-installed packages
+sudo apt autoremove
+# Only removes packages that were auto-installed and not needed by other manual packages
+```
+
+**Key difference:** Workflow 1 keeps the meta-package for ongoing dependency management. Workflow 2 uses PRP to intelligently mark packages for cleanup, then discards the tracking.
 
 ## Features That Actually Matter
 
@@ -88,81 +121,82 @@ Creates proper Debian packages that `apt` understands. No weird scripts, no magi
 
 ## Commands Reference
 
-| Command | What it does | Why you'll love it |
+| Command | What it does | Functional purpose |
 |---------|-------------|-------------------|
-| `prp n PROJECT` | Create new project (makes .prp/ dir; PROJECT-deps is the future package name) | Because naming things is hard enough
-| `prp t PKG [PKG2...]` | Track packages & auto-install | One command to rule them all |
-| `prp t PKG -I` | Track only (no install) | For the control freaks |
-| `prp a PKG [PKG2...]` | Add packages to dependencies | The meat and potatoes |
-| `prp a` | Add all tentative packages | For the "yep, all of them" moment |
-| `prp e PKG` | Add to tentative (evaluating) | "I think I need this but..." |
-| `prp r PKG` | Remove from deps & mark for cleanup | Mistakes were made |
-| `prp s` | Show status | Your project at a glance |
-| `prp install` | Build & install meta-package | Make it official |
-| `prp uninstall` | Remove meta-package & cleanup | The great cleanup |
+| `prp n PROJECT` | Create new project (makes .prp/ dir; PROJECT-deps is the future package name) | Initialize dependency tracking in current directory |
+| `prp t PKG [PKG2...]` | Track packages & auto-install | Record original state before installation |
+| `prp t PKG -I` | Track only (no install) | Record state without changing system |
+| `prp a PKG [PKG2...]` | Add packages to dependencies | Mark packages as project requirements |
+| `prp a` | Add all tentative packages | Confirm all tracked packages as dependencies |
+| `prp e PKG` | Add to tentative (evaluating) | Track package without committing to it |
+| `prp r PKG` | Remove from deps & mark for cleanup | Remove package from project requirements |
+| `prp s` | Show status | Display current project state and package lists |
+| `prp install` | Build & install meta-package | Create system package that depends on all requirements |
+| `prp uninstall` | Remove meta-package & cleanup | Remove meta-package and restore original package states |
 
 ### Track Command Options
 
-| Flag | Effect | Use Case |
+| Flag | Effect | When to use |
 |------|--------|----------|
-| `prp t PKG` | Track & install (default) | Normal workflow |
-| `prp t PKG -I` | Track only, don't install | Manual control over installation |
-| `prp t PKG --no-install` | Same as `-I` | Explicit clarity |
-| `prp t PKG --update` | Refresh recorded state | After manual system changes |
+| `prp t PKG` | Track & install (default) | Normal workflow - install package while recording its original state |
+| `prp t PKG -I` | Track only, don't install | When you want to record state before deciding whether to install |
+| `prp t PKG --no-install` | Same as `-I` | Alternative flag for the same behavior |
+| `prp t PKG --update` | Refresh recorded state | When package state changed outside of PRP and you need to update records |
 
 ## Real-World Workflows
 
-### The Streamlined Workflow (Recommended)
-*The new default - track and install in one step*
+### Standard Workflow (Recommended)
+*Track packages first to record their original state, then add to dependencies*
 
 ```bash
 prp n mediapipe-experiment
-prp t libjpeg-dev libpng-dev libtiff-dev opencv-dev  # Auto-installs!
+prp t libjpeg-dev libpng-dev libtiff-dev opencv-dev  # Auto-installs & tracks state
 prp a  # Adds all tentative, respects pre-project states
 prp install
 ```
 
-### The Control Freak Workflow
-*For when you want manual control*
+### Manual Installation Control
+*Track packages without auto-installing, then install manually when ready*
 
 ```bash
 prp n mediapipe-experiment
-prp t libjpeg-dev libpng-dev -I  # Track but don't install
+prp t libjpeg-dev libpng-dev -I  # Track state but don't install yet
 sudo apt install libjpeg-dev    # Install manually when ready
 sudo apt install libpng-dev
-prp a  # Add all tentative
+prp a  # Add all tentative to dependencies
 prp install
 ```
 
-### The YOLO Workflow  
-*For when you're feeling lucky*
+### Skip State Recording  
+*Add packages directly without tracking original state (faster but less safe)*
 
 ```bash
 prp n quick-hack
-prp a libjpeg-dev libpng-dev libtiff-dev  # Direct add & install
+prp a libjpeg-dev libpng-dev libtiff-dev  # Direct add, no state recording
 prp install
 ```
+**Note**: This skips the `prp t` step, so PRP can't restore original package states during cleanup.
 
-### The "Oh No" Workflow
-*For when things went sideways*
+### Remove Unwanted Dependencies
+*Remove packages from tracking and prepare them for cleanup*
 
 ```bash
-prp r opencv-dev  # Oops, didn't need this
-prp uninstall     # Nuclear option: remove everything
-sudo apt autoremove  # Now safe
+prp r opencv-dev  # Remove from dependencies, mark for cleanup
+prp uninstall     # Remove meta-package and restore original states
+sudo apt autoremove  # Clean up auto-marked packages
 ```
 
-### The Incremental Workflow
-*Building up dependencies as you discover them*
+### Incremental Discovery
+*Add dependencies as you discover build failures*
 
 ```bash
 prp n complex-project
-prp t libjpeg-dev      # Start with what you know
-# (build fails)
-prp t libpng-dev       # Add more as needed
-# (build fails again)  
-prp t libtiff-dev      # Keep adding...
-prp a                  # Finalize all tentative
+prp t libjpeg-dev      # Start with what you know you need
+# (build fails: missing libpng)
+prp t libpng-dev       # Add newly discovered dependency
+# (build fails: missing libtiff)  
+prp t libtiff-dev      # Keep adding as needed...
+prp a                  # Finalize all tentative packages
 prp install
 ```
 
@@ -184,6 +218,22 @@ sudo mv prp /usr/local/bin/
 git clone https://github.com/yourusername/prp.git
 sudo ln -s $(pwd)/prp/prp /usr/local/bin/prp
 ```
+
+## Limitations & Known Issues
+
+### Dependency Tracking Scope
+**PRP only tracks packages you explicitly tell it to track.** When you `prp t libopencv-dev`, PRP doesn't monitor the 15 dependencies that `apt` pulls in automatically (like `libopencv-core`, `libpng16-16`, etc.).
+
+This is usually fine because:
+- Those dependencies get marked as auto-installed by `apt`
+- They'll be removed by `apt autoremove` when no longer needed
+
+**However**, there's a Debian quirk: packages that are *recommended* by other installed packages won't be auto-removed, even if marked as auto-installed. So if you have Package A installed that recommends `libfoo-dev`, and you also install `libfoo-dev` as a dependency of your tracked package, `apt autoremove` won't remove `libfoo-dev` even after you uninstall your project.
+
+**Workaround**: If you notice packages lingering after cleanup, you can manually `sudo apt remove` them or use `apt-mark showmanual` to review what's marked as manually installed.
+
+### Cross-Project Package Sharing
+If you use the same package across multiple PRP projects, the "original state" recorded by the first project takes precedence. This is generally correct behavior, but can be confusing if you change a package's manual/auto status outside of PRP.
 
 ## FAQ
 
@@ -207,6 +257,9 @@ A: `prp t package1 package2 --update` will record current states. PRP is designe
 
 **Q: Can I track packages that aren't in the main repos?**  
 A: Yes! Use `prp a package-name -f` to force-add packages from PPAs or custom repos. `prp t` will skip installation for packages it can't find but still track them.
+
+**Q: Should I use Workflow 1 or 2?**  
+A: Use Workflow 1 for ongoing projects where you want easy dependency reinstallation later. Use Workflow 2 for temporary experiments where you just want intelligent cleanup without keeping tracking files.
 
 ## Under the Hood
 

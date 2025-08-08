@@ -38,16 +38,12 @@ $ sudo apt autoremove
 curl -O https://raw.githubusercontent.com/yourusername/prp/main/prp
 chmod +x prp
 
-# Create a project
+# Create a project and track dependencies (auto-installs!)
+## This creates the .prp dir local to the current working directory. The project name is used for later packaging up as `my-cool-project-deps.deb` that depends on the dependencies.
 ./prp n my-cool-project
-
-# Track what you're about to install (safe mode)
 ./prp t libjpeg-dev libpng-dev libtiff-dev
 
-# Install manually to test
-sudo apt install libjpeg-dev libpng-dev libtiff-dev
-
-# Add to project (respects pre-existing package states)
+# Add to project dependencies (respects pre-existing package states)
 ./prp a
 
 # Create meta-package and install
@@ -63,6 +59,12 @@ sudo apt autoremove  # Now safe and predictable
 ### 🛡️ **Non-Destructive by Design**
 PRP remembers what was manually installed *before* your project started. Your colleague's `libjpeg-dev` won't become auto-removable just because you used it too.
 
+### ⚡ **Track & Install in One Command**
+```bash
+prp t libjpeg-dev libpng-dev libtiff-dev  # Records state AND installs
+# No more manual `sudo apt install` step!
+```
+
 ### 📦 **One Command, Multiple Packages**
 ```bash
 prp a libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev
@@ -71,7 +73,7 @@ prp a libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev
 
 ### 🎯 **Tentative Tracking**
 ```bash
-prp t opencv-dev qt5-dev  # "I might need these..."
+prp t opencv-dev qt5-dev  # "I might need these..." (auto-installs)
 # (experiment for 3 hours)
 prp a                     # "OK, keeping them all"
 ```
@@ -80,7 +82,7 @@ prp a                     # "OK, keeping them all"
 Creates proper Debian packages that `apt` understands. No weird scripts, no magic files in `/usr/local/`, no "trust me bro" installations.
 
 ### 🔄 **Smart State Management**
-- **Track** packages before installing to preserve original states
+- **Track** packages and auto-install while preserving original states
 - **Add** packages individually or in bulk with intelligent auto-marking
 - **Remove** cleanly with restoration to pre-project configuration
 
@@ -88,8 +90,9 @@ Creates proper Debian packages that `apt` understands. No weird scripts, no magi
 
 | Command | What it does | Why you'll love it |
 |---------|-------------|-------------------|
-| `prp n PROJECT` | Create new project | Because naming things is hard enough |
-| `prp t PKG [PKG2...]` | Track packages (record current state) | Paranoia that pays off |
+| `prp n PROJECT` | Create new project (makes .prp/ dir; PROJECT-deps is the future package name) | Because naming things is hard enough
+| `prp t PKG [PKG2...]` | Track packages & auto-install | One command to rule them all |
+| `prp t PKG -I` | Track only (no install) | For the control freaks |
 | `prp a PKG [PKG2...]` | Add packages to dependencies | The meat and potatoes |
 | `prp a` | Add all tentative packages | For the "yep, all of them" moment |
 | `prp e PKG` | Add to tentative (evaluating) | "I think I need this but..." |
@@ -98,16 +101,36 @@ Creates proper Debian packages that `apt` understands. No weird scripts, no magi
 | `prp install` | Build & install meta-package | Make it official |
 | `prp uninstall` | Remove meta-package & cleanup | The great cleanup |
 
+### Track Command Options
+
+| Flag | Effect | Use Case |
+|------|--------|----------|
+| `prp t PKG` | Track & install (default) | Normal workflow |
+| `prp t PKG -I` | Track only, don't install | Manual control over installation |
+| `prp t PKG --no-install` | Same as `-I` | Explicit clarity |
+| `prp t PKG --update` | Refresh recorded state | After manual system changes |
+
 ## Real-World Workflows
 
-### The Paranoid Workflow (Recommended)
-*For when you've been burned before*
+### The Streamlined Workflow (Recommended)
+*The new default - track and install in one step*
 
 ```bash
 prp n mediapipe-experiment
-prp t libjpeg-dev libpng-dev libtiff-dev opencv-dev
-sudo apt install libjpeg-dev libpng-dev libtiff-dev opencv-dev
+prp t libjpeg-dev libpng-dev libtiff-dev opencv-dev  # Auto-installs!
 prp a  # Adds all tentative, respects pre-project states
+prp install
+```
+
+### The Control Freak Workflow
+*For when you want manual control*
+
+```bash
+prp n mediapipe-experiment
+prp t libjpeg-dev libpng-dev -I  # Track but don't install
+sudo apt install libjpeg-dev    # Install manually when ready
+sudo apt install libpng-dev
+prp a  # Add all tentative
 prp install
 ```
 
@@ -116,7 +139,7 @@ prp install
 
 ```bash
 prp n quick-hack
-prp a libjpeg-dev libpng-dev libtiff-dev
+prp a libjpeg-dev libpng-dev libtiff-dev  # Direct add & install
 prp install
 ```
 
@@ -127,6 +150,20 @@ prp install
 prp r opencv-dev  # Oops, didn't need this
 prp uninstall     # Nuclear option: remove everything
 sudo apt autoremove  # Now safe
+```
+
+### The Incremental Workflow
+*Building up dependencies as you discover them*
+
+```bash
+prp n complex-project
+prp t libjpeg-dev      # Start with what you know
+# (build fails)
+prp t libpng-dev       # Add more as needed
+# (build fails again)  
+prp t libtiff-dev      # Keep adding...
+prp a                  # Finalize all tentative
+prp install
 ```
 
 ## Installation
@@ -153,6 +190,9 @@ sudo ln -s $(pwd)/prp/prp /usr/local/bin/prp
 **Q: Yet another package manager?**  
 A: No. PRP is a *dependency tracker* that creates standard Debian packages. It's `equivs` with a brain and a memory.
 
+**Q: Why does `prp t` install packages automatically now?**  
+A: Because 90% of the time, you track packages because you're about to install them. Use `-I` when you want to track without installing.
+
 **Q: What about Docker/containers?**  
 A: Great for production. This is for development where you need to `apt install` things while figuring out what you actually need.
 
@@ -165,6 +205,9 @@ A: PRP generates standard Debian control files that your security team can audit
 **Q: What if I already have a mess of manually installed packages?**  
 A: `prp t package1 package2 --update` will record current states. PRP is designed to be adopted gradually.
 
+**Q: Can I track packages that aren't in the main repos?**  
+A: Yes! Use `prp a package-name -f` to force-add packages from PPAs or custom repos. `prp t` will skip installation for packages it can't find but still track them.
+
 ## Under the Hood
 
 PRP stores project state in `.prp/state.yaml`:
@@ -172,7 +215,7 @@ PRP stores project state in `.prp/state.yaml`:
 ```yaml
 project:
   name: my-project
-  package_name: my-project-deps
+  package_name: my-project-deps # This becomes the .deb filename
 dependencies:
   - libjpeg-dev
   - libpng-dev
@@ -182,9 +225,17 @@ original_state:
   libjpeg-dev:
     was_installed: true
     was_manual: true  # Won't mark as auto on cleanup
+  libpng-dev:
+    was_installed: false
+    was_manual: false  # Was installed by this project
 ```
 
 The generated meta-package is just a standard Debian package that depends on your tracked packages. No magic, no lock-in.
+
+When you `prp t package-name`, PRP:
+1. Records the package's current state (installed/not installed, manual/auto)
+2. Installs the package via `sudo apt install -y` (unless `-I` flag used)
+3. Adds to tentative list for later confirmation with `prp a`
 
 ## Contributing
 

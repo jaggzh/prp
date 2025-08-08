@@ -20,9 +20,12 @@ class Colors:
     DIM = '\033[2m'
     
     # Regular colors
+    BBLACK = '\033[30;1m'
+    GRAY = '\033[0;37m'
     RED = '\033[31m'
     GREEN = '\033[32m'
-    YELLOW = '\033[33m'
+    BROWN = '\033[0;33m'
+    YELLOW = '\033[33;1m'
     BLUE = '\033[34m'
     MAGENTA = '\033[35m'
     CYAN = '\033[36m'
@@ -151,6 +154,25 @@ class DebianPlatform:
         except:
             return False, False
     
+    def install_package_apt(self, package_name: str) -> bool:
+        """Install package using apt. Returns True if successful."""
+        try:
+            clean_name = package_name.strip()
+            print(f"{c.BLUE}Installing {clean_name} with apt...{c.RESET}")
+            
+            cmd = ['sudo', 'apt', 'install', '-y', clean_name]
+            result = subprocess.run(cmd)
+            
+            if result.returncode == 0:
+                print(f"{c.GREEN}Successfully installed {clean_name}{c.RESET}")
+                return True
+            else:
+                print(f"{c.RED}Failed to install {clean_name}{c.RESET}")
+                return False
+        except Exception as e:
+            print(f"{c.RED}Error installing {clean_name}: {e}{c.RESET}")
+            return False
+    
     def build_meta_package(self, name: str, deps: List[str], version: str, maintainer: str) -> Path:
         """Build meta-package using equivs-build"""
         if not deps:
@@ -243,8 +265,8 @@ class PRP:
         print(f"{c.BLUE}Package named appropriately as '{package_name}'{c.RESET}")
         print(f"{c.GREEN}Created: ./.prp/state.yaml{c.RESET}")
     
-    def cmd_track(self, package_names: List[str], update: bool = False):
-        """Track packages and record their current state before experimenting"""
+    def cmd_track(self, package_names: List[str], update: bool = False, no_install: bool = False):
+        """Track packages, record their current state, and optionally install them"""
         state = self.state_manager.load()
         
         if not state['project']['name']:
@@ -256,6 +278,7 @@ class PRP:
             state['original_state'] = {}
         
         state_changed = False
+        packages_to_install = []
         
         for package_name in package_names:
             clean_name = package_name.strip()
@@ -278,6 +301,9 @@ class PRP:
                 else:
                     action = "updated" if update else "recorded"
                     print(f"{c.YELLOW}   {clean_name} is not installed - {action}{c.RESET}")
+                    # Mark for installation if not installed and not no_install flag
+                    if not no_install:
+                        packages_to_install.append(clean_name)
                 state_changed = True
             else:
                 orig = state['original_state'][clean_name]  # Use clean_name for lookup
@@ -286,6 +312,10 @@ class PRP:
                     print(f"{c.DIM}   {clean_name} original state: was {status_desc} (use --update to refresh){c.RESET}")
                 else:
                     print(f"{c.DIM}   {clean_name} original state: was not installed (use --update to refresh){c.RESET}")
+                    # Mark for installation if not currently installed and not no_install flag
+                    current_installed, _ = self.platform.package_status(clean_name)
+                    if not current_installed and not no_install:
+                        packages_to_install.append(clean_name)
             
             # Add to tentative list if not already in dependencies
             if clean_name not in state['dependencies']:
@@ -298,11 +328,34 @@ class PRP:
             else:
                 print(f"{c.GREEN}   Already in dependencies{c.RESET}")
         
+        # Install packages if needed
+        if packages_to_install:
+            print(f"\n{c.BLUE}Installing {len(packages_to_install)} package(s)...{c.RESET}")
+            
+            for pkg in packages_to_install:
+                # Check if package exists in repositories before installing
+                if self.platform.package_exists(pkg):
+                    success = self.platform.install_package_apt(pkg)
+                    if success:
+                        # Update the state to reflect that it's now installed
+                        is_installed, is_manual = self.platform.package_status(pkg)
+                        if pkg in state['original_state']:
+                            # Keep the original was_installed state, but note it's now installed
+                            print(f"{c.DIM}   Package {pkg} now installed (originally was not){c.RESET}")
+                    else:
+                        print(f"{c.YELLOW}   Failed to install {pkg}, continuing with tracking{c.RESET}")
+                else:
+                    print(f"{c.YELLOW}   {pkg} not found in repositories, skipping installation{c.RESET}")
+        elif not no_install:
+            print(f"{c.GREEN}All tracked packages are already installed{c.RESET}")
+        
         if state_changed:
             self.state_manager.save(state)
             
         print(f"\n{c.GREEN}State tracking complete{c.RESET}")
-        print(f"{c.DIM}Install packages manually, then use 'prp a' to add safely{c.RESET}")
+        if no_install:
+            print(f"{c.DIM}Packages were tracked but not installed (--no-install used){c.RESET}")
+        print(f"{c.DIM}Use 'prp a' to add tentative packages to dependencies{c.RESET}")
     
     def cmd_add_tentative(self):
         """Add all tentative packages to dependencies"""
@@ -506,11 +559,11 @@ class PRP:
                 if pkg in original_state:
                     orig = original_state[pkg]
                     if orig['was_manual']:
-                        orig_marker = f" {c.DIM}(was manual){c.RESET}"
+                        orig_marker = f" {c.DIM}({c.GREEN}✋{c.DIM} was manual{c.RESET})"
                     elif orig['was_installed']:
-                        orig_marker = f" {c.DIM}(was auto){c.RESET}"
+                        orig_marker = f" {c.DIM}({c.BBLUE}🛠️ was auto{c.RESET})"
                     else:
-                        orig_marker = f" {c.DIM}(was not installed){c.RESET}"
+                        orig_marker = f" {c.DIM}({c.YELLOW}↶ {c.YELLOW}{c.BOLD} was not installed{c.RESET})"
                 print(f"  {c.YELLOW}?{c.RESET} {pkg}{orig_marker}")
         
         # Cleanup
@@ -527,7 +580,7 @@ class PRP:
         
         if not deps and not tentative:
             print(f"\n{c.DIM}No dependencies tracked yet.{c.RESET}")
-            print(f"{c.DIM}Use 'prp t PACKAGE' to track then 'prp a' to add safely{c.RESET}")
+            print(f"{c.DIM}Use 'prp t PACKAGE' to track and install, then 'prp a' to add to dependencies{c.RESET}")
             print(f"{c.DIM}Or 'prp a PACKAGE' to add directly{c.RESET}")
         
         print()
@@ -635,8 +688,9 @@ def show_help():
 
 {c.BOLD}Commands:{c.RESET}
   {c.BGREEN}n, new{c.RESET} PROJECT_NAME     Create new project
-  {c.BGREEN}t, track{c.RESET} PACKAGE [PKG2...]  Track packages & record current state
+  {c.BGREEN}t, track{c.RESET} PACKAGE [PKG2...]  Track packages, record state & auto-install
     {c.DIM}--update            Update recorded state to current state{c.RESET}
+    {c.DIM}-I, --no-install     Only track, don't install packages{c.RESET}
   {c.BGREEN}a, add{c.RESET} PACKAGE [PKG2...]    Add package(s) to dependencies  
   {c.BGREEN}a, add{c.RESET}                     Add all tentative packages
     {c.DIM}-f, --force          Force add even if package not found{c.RESET}
@@ -650,10 +704,12 @@ def show_help():
 
 {c.BOLD}Safe workflow (preserves pre-project package states):{c.RESET}
   {c.CYAN}$ prp n mediapipe{c.RESET}                           {c.DIM}# Start new project{c.RESET}
-  {c.CYAN}$ prp t libjpeg-dev libpng-dev{c.RESET}              {c.DIM}# Record current state{c.RESET}
-  {c.CYAN}$ sudo apt install libjpeg-dev libpng-dev{c.RESET}   {c.DIM}# Install manually{c.RESET}
+  {c.CYAN}$ prp t libjpeg-dev libpng-dev{c.RESET}              {c.DIM}# Track & auto-install{c.RESET}
   {c.CYAN}$ prp a{c.RESET}                                     {c.DIM}# Add all tentative (respects original state){c.RESET}
   {c.CYAN}$ prp install{c.RESET}                               {c.DIM}# Create & install meta-package{c.RESET}
+
+{c.BOLD}Track without installing:{c.RESET}
+  {c.CYAN}$ prp t libjpeg-dev -I{c.RESET}                      {c.DIM}# Track only, don't install{c.RESET}
 
 {c.BOLD}Update tracking after system changes:{c.RESET}
   {c.CYAN}$ prp t libjpeg-dev --update{c.RESET}                {c.DIM}# Update recorded state to current{c.RESET}
@@ -711,15 +767,18 @@ def main():
     elif command in ['t', 'track']:
         if len(args) < 1:
             print(f"{c.RED}Error: Package name(s) required{c.RESET}")
-            print(f"{c.DIM}Usage: prp t PACKAGE [PACKAGE2 ...] [--update]{c.RESET}")
+            print(f"{c.DIM}Usage: prp t PACKAGE [PACKAGE2 ...] [--update] [-I|--no-install]{c.RESET}")
             return
         
         # Parse flags and packages
         packages = []
         update = False
+        no_install = False
         for arg in args:
             if arg == '--update':
                 update = True
+            elif arg in ['-I', '--no-install']:
+                no_install = True
             elif not arg.startswith('-'):
                 packages.append(arg)
         
@@ -727,7 +786,7 @@ def main():
             print(f"{c.RED}Error: No package names provided{c.RESET}")
             return
             
-        prp.cmd_track(packages, update=update)
+        prp.cmd_track(packages, update=update, no_install=no_install)
     
     elif command in ['r', 'remove']:
         if len(args) < 1:

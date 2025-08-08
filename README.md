@@ -45,7 +45,9 @@ curl -O https://raw.githubusercontent.com/yourusername/prp/main/prp
 chmod +x prp
 
 # Create a project and track dependencies (auto-installs!)
-## This creates the .prp dir local to the current working directory. The project name is used for later packaging up as `my-cool-project-deps.deb` that depends on the dependencies.
+## This creates the .prp dir local to the current working directory. The
+## project name is used for later packaging up as `my-cool-project-deps.deb`
+## that depends on the dependencies.
 ./prp n my-cool-project
 ./prp t libjpeg-dev libpng-dev libtiff-dev
 
@@ -54,7 +56,8 @@ chmod +x prp
 
 # Create meta-package and install it
 ./prp install
-# Now you have my-cool-project-deps installed, which pulls in all your tracked dependencies
+## Now you have my-cool-project-deps installed, which pulls in all your
+## tracked dependencies
 
 # Later: clean removal of everything
 ./prp uninstall  # Removes meta-package and restores original package states

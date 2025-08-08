@@ -26,7 +26,8 @@ $ make
 ✓ Success! 
 # ... 6 months later ...
 $ sudo apt autoremove
-# Did I need those 47 -dev packages? 🤷 (Now I have a bunch of manually-installed stuff on my system with no relation to anything else.)
+# Did I need those 47 -dev packages? 🤷 (Now I have a bunch of
+# manually-installed stuff on my system, with no relation to anything else.)
 ```
 
 **PRP** turns this chaos into clean, tracked, removable dependency management.
